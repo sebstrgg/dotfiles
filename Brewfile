@@ -43,7 +43,7 @@ cask "logi-options+"       # Logitech device sync
 
 # Screenshots, notes, keys
 cask "ishare"              # Screenshot replacement for ⌘⇧3/4
-cask "fluxmarkdown"        # Markdown QuickLook preview
+cask "xykong/tap/flux-markdown"  # Markdown QuickLook preview (3rd-party tap)
 cask "dockey"              # SSH key manager
 
 # Network
