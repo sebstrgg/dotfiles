@@ -147,17 +147,6 @@ elif [[ "$PLATFORM" == "linux" ]]; then
     fi
 fi
 
-# ── Step 1b: Mac App Store apps ──────────────────────
-if [[ "$PLATFORM" == "macos" ]]; then
-    info "Installing Mac App Store apps..."
-    if command -v mas &>/dev/null; then
-        mas install 1631335820  # Element X — idempotent; no-op if installed
-        ok "MAS apps installed"
-    else
-        warn "mas CLI not found — Element X install skipped"
-    fi
-fi
-
 # ── Step 1c: macOS app preference restore ─────────────
 if [[ "$PLATFORM" == "macos" ]]; then
     info "Restoring macOS app preferences..."
@@ -363,10 +352,20 @@ fi
 echo ""
 echo "  Next steps:"
 echo ""
+if [[ "$PLATFORM" == "macos" ]]; then
+echo "  1. Install Element X from the Mac App Store"
+echo "     Open App Store → search \"Element X\" → click Get (id 1631335820)."
+echo "     Free app, ~30 seconds. Then sign in (next step)."
+echo "  2. Open a new terminal (or restart your shell)"
+echo "  3. Press Ctrl+a then I (capital i) to install tmux plugins"
+echo "  4. Press Ctrl+a then r to reload tmux config"
+echo "  5. Press Ctrl+a then ? for the cheat sheet"
+else
 echo "  1. Open a new terminal (or restart your shell)"
 echo "  2. Press Ctrl+a then I (capital i) to install tmux plugins"
 echo "  3. Press Ctrl+a then r to reload tmux config"
 echo "  4. Press Ctrl+a then ? for the cheat sheet"
+fi
 echo ""
 
 # ── Step 8: GitHub CLI auth ─────────────────────────

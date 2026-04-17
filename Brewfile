@@ -28,9 +28,6 @@ brew "mosh"         # mobile shell (SSH replacement with roaming)
 cask "font-jetbrains-mono-nerd-font"
 
 # ── GUI apps (macOS only) ────────────────────────────────────────
-# Mac App Store support (for Element X, which is MAS-only)
-brew "mas"
-
 # Productivity
 cask "alfred"              # Spotlight replacement (Powerpack license entered manually)
 cask "hiddenbar"           # Menu bar item hider
@@ -58,5 +55,3 @@ cask "telegram"
 # Display — critical for headless Mac mini remote desktop crispness
 cask "betterdisplay"       # virtual display for matching client resolution
 
-# Mac App Store apps (requires one-time App Store sign-in, handled by Setup Assistant)
-mas "Element X", id: 1631335820
