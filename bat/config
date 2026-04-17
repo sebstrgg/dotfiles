@@ -1,0 +1,8 @@
+# bat configuration
+# Symlinked to ~/.config/bat/config
+
+# Use Catppuccin Mocha theme (tmTheme installed to ~/.config/bat/themes/)
+--theme="Catppuccin Mocha"
+
+# Show line numbers, git changes, and header with filename
+--style="numbers,changes,header"

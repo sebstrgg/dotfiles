@@ -1,0 +1,112 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(touch:*)",
+      "Bash(diff:*)",
+      "Bash(which:*)",
+      "Bash(pwd:*)",
+      "Bash(date:*)",
+      "Bash(stat:*)",
+      "Bash(basename:*)",
+      "Bash(dirname:*)",
+      "Bash(realpath:*)",
+      "Bash(jq:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(cut:*)",
+      "Bash(tr:*)",
+      "Bash(xargs:*)",
+      "Bash(tee:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git show:*)",
+      "Bash(git describe:*)",
+      "Bash(git fetch:*)",
+      "Bash(git tag:*)",
+      "Bash(git remote:*)",
+      "Bash(gh:*)"
+    ],
+    "defaultMode": "auto"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -f ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-track.sh && bash ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-track.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -f ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-cleanup.sh && bash ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-cleanup.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh",
+    "padding": 2
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true,
+    "static-analysis@trailofbits": true,
+    "semgrep-rule-creator@trailofbits": true,
+    "supply-chain-risk-auditor@trailofbits": true,
+    "differential-review@trailofbits": true,
+    "insecure-defaults@trailofbits": true,
+    "sharp-edges@trailofbits": true,
+    "agentic-actions-auditor@trailofbits": true,
+    "modern-python@trailofbits": true,
+    "content-creator@claude-code-skills": true,
+    "demand-gen@claude-code-skills": true,
+    "self-improving-agent@claude-code-skills": true,
+    "executive-mentor@claude-code-skills": true,
+    "marketing-skills@claude-code-skills": true,
+    "business-growth-skills@claude-code-skills": true,
+    "c-level-skills@claude-code-skills": true,
+    "engineering-skills@claude-code-skills": true,
+    "pm-skills@claude-code-skills": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-plugins-official": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-official"
+      }
+    },
+    "trailofbits": {
+      "source": {
+        "source": "github",
+        "repo": "trailofbits/skills"
+      }
+    },
+    "claude-code-skills": {
+      "source": {
+        "source": "github",
+        "repo": "alirezarezvani/claude-skills"
+      }
+    }
+  },
+  "effortLevel": "xhigh",
+  "skipDangerousModePermissionPrompt": true,
+  "skipAutoPermissionPrompt": true,
+  "voiceEnabled": true
+}

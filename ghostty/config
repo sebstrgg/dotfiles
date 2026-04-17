@@ -1,0 +1,33 @@
+# Ghostty Configuration — Catppuccin Mocha + Claude Code optimized
+# Docs: https://ghostty.org/docs/config/reference
+
+# ── Theme ──────────────────────────────────────────────
+theme = Catppuccin Mocha
+
+# ── Font ───────────────────────────────────────────────
+font-family = JetBrainsMono Nerd Font
+font-size = 14
+
+# ── Window ─────────────────────────────────────────────
+# Transparent titlebar blends with terminal background
+macos-titlebar-style = transparent
+
+# Padding for breathing room (in pixels)
+window-padding-x = 8
+window-padding-y = 8
+
+# Don't prompt when closing (tmux handles session persistence)
+confirm-close-surface = false
+
+# ── Clipboard ──────────────────────────────────────────
+# Auto-copy selected text to both selection and system clipboards
+copy-on-select = clipboard
+
+# ── Links ──────────────────────────────────────────────
+# URLs auto-detected and clickable via Cmd+click
+# (Cmd+Shift+click when tmux mouse mode is on)
+link-url = true
+
+# ── Input ──────────────────────────────────────────────
+# Ensure mouse reporting works properly with tmux
+mouse-shift-capture = false

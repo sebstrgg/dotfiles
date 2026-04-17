@@ -1,0 +1,25 @@
+# nano configuration — managed by dotfiles
+# Symlinked to ~/.nanorc
+# Uses brew nano (not macOS built-in) for syntax highlighting
+
+# Include all syntax highlighting definitions from brew nano
+include "/opt/homebrew/share/nano/*.nanorc"
+
+# Line numbers
+set linenumbers
+
+# Smooth scrolling
+set smooth
+
+# Auto-indent
+set autoindent
+
+# Show cursor position in status bar
+set constantshow
+
+# Use spaces instead of tabs
+set tabsize 4
+set tabstospaces
+
+# Soft line wrapping
+set softwrap

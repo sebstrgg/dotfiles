@@ -1,0 +1,34 @@
+# Git configuration — managed by dotfiles
+# Symlinked to ~/.gitconfig
+
+[user]
+    name = sebstrgg
+    email = sebastian@wollter.nu
+
+[core]
+    pager = delta
+    editor = nano
+
+[interactive]
+    diffFilter = delta --color-only
+
+[delta]
+    features = catppuccin-mocha
+    side-by-side = true
+    navigate = true
+    line-numbers = true
+
+[merge]
+    conflictstyle = zdiff3
+
+[diff]
+    colorMoved = default
+
+[include]
+    path = ~/.config/git/catppuccin.gitconfig
+[credential "https://github.com"]
+	helper = 
+	helper = !/usr/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper = 
+	helper = !/usr/bin/gh auth git-credential

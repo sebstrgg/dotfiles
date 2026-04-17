@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Superpowers brainstorm state
+.superpowers/
+
+# API keys (safety net — should live at ~/.env.ai, not in repo)
+.env.ai
+
+# Design docs and plans (local-only, not shipped with the public repo)
+docs/
