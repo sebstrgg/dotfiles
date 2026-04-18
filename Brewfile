@@ -17,6 +17,24 @@ brew "fzf"          # fuzzy finder (Ctrl+R, Ctrl+T)
 brew "zoxide"       # smart cd that learns your directories
 brew "glow"         # markdown viewer
 brew "nano"         # modern nano with syntax highlighting
+brew "ripgrep"      # faster grep (Claude's Grep tool uses this)
+brew "fd"           # faster find
+brew "jq"           # JSON processor
+brew "yq"           # YAML processor (go version — NOT the python one)
+brew "direnv"       # per-directory environment variables
+
+# Python
+brew "uv"           # modern Python package manager (replaces pip/poetry)
+
+# Shell scripting quality
+brew "shellcheck"   # bash linter
+brew "shfmt"        # bash formatter
+
+# Shell history sync
+brew "atuin"        # encrypted shell history sync (requires separate `atuin login` — see runbook)
+
+# Password / SSH key management
+brew "bitwarden-cli"  # complements the Bitwarden desktop app
 
 # Git
 brew "gh"           # GitHub CLI
@@ -43,6 +61,12 @@ cask "ishare"              # Screenshot replacement for ⌘⇧3/4
 cask "xykong/tap/flux-markdown"  # Markdown QuickLook preview (3rd-party tap)
 cask "dockey"              # SSH key manager
 
+# Window management
+cask "rectangle"    # keyboard + drag tiling (⌃⌥ arrows, drag-to-edge snap)
+
+# System monitoring
+cask "stats"        # menu bar CPU/memory/network/temp (useful for headless mini)
+
 # Security & passwords
 cask "bitwarden"           # password manager
 
@@ -57,4 +81,7 @@ cask "telegram"
 
 # Display — critical for headless Mac mini remote desktop crispness
 cask "betterdisplay"       # virtual display for matching client resolution
+
+# Container runtime (faster + lighter than Docker Desktop)
+cask "orbstack"     # Docker Engine + Linux VMs, native Apple Virtualization
 

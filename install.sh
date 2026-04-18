@@ -61,6 +61,34 @@ case "$OS" in
     *)      error "Unsupported OS: $OS"; exit 1 ;;
 esac
 
+# ── Headless Mac mini detection ───────────────────────
+HEADLESS_MODE=0
+if [[ "$PLATFORM" == "macos" ]]; then
+    echo ""
+    echo "────────────────────────────────────────────────────────────"
+    echo "Is this a headless Mac mini?"
+    echo ""
+    echo "  Headless = always on, no display attached, accessed only"
+    echo "  via Apple Screen Sharing or VNC from another machine."
+    echo ""
+    echo "  Answering YES will:"
+    echo "    • Disable system/display/disk sleep (pmset always-on)"
+    echo "    • Enable Wake-on-LAN + auto-restart after power failure"
+    echo "    • Tune the Screen Sharing VNC fallback for max quality"
+    echo "    • Print HDMI dummy plug reminder in the final checklist"
+    echo ""
+    echo "  Answer NO if this is a laptop, a work/managed Mac, or a"
+    echo "  regular desktop with a display attached — you don't want"
+    echo "  to disable sleep on those."
+    echo "────────────────────────────────────────────────────────────"
+    read -rp "Configure as headless Mac mini? [y/N] " _reply
+    case "$_reply" in
+        [Yy]*) HEADLESS_MODE=1; ok "Headless Mac mini mode enabled" ;;
+        *)     HEADLESS_MODE=0; info "Skipping headless-specific steps" ;;
+    esac
+    echo ""
+fi
+
 echo ""
 echo -e "${BLUE}╔══════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║  Dotfiles Installer                      ║${NC}"
@@ -104,7 +132,11 @@ elif [[ "$PLATFORM" == "linux" ]]; then
         mosh \
         gh \
         zsh-autosuggestions \
-        zsh-syntax-highlighting
+        zsh-syntax-highlighting \
+        ripgrep \
+        fd-find \
+        direnv \
+        shellcheck
     ok "All packages installed"
 
     # git-delta (not in apt, install from GitHub releases)
@@ -135,6 +167,13 @@ elif [[ "$PLATFORM" == "linux" ]]; then
         mkdir -p "$HOME/.local/bin"
         ln -sf "$(which batcat)" "$HOME/.local/bin/bat"
         ok "bat alias created (batcat → bat)"
+    fi
+
+    # fd-find → fd alias (Ubuntu names the binary fdfind)
+    if command -v fdfind &>/dev/null && ! command -v fd &>/dev/null; then
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$(which fdfind)" "$HOME/.local/bin/fd"
+        ok "fd alias created (fdfind → fd)"
     fi
 
     # Set zsh as default shell
@@ -179,7 +218,7 @@ if [[ "$PLATFORM" == "macos" ]]; then
     fi
 fi
 
-# ── Step 1d: macOS hotkey remaps, defaults, pmset ─────
+# ── Step 1d: macOS hotkey remaps, defaults, pmset, screensharing ─────
 if [[ "$PLATFORM" == "macos" ]]; then
     info "Applying macOS hotkey remaps..."
     bash "$SCRIPT_DIR/mac-apps/hotkeys/symbolichotkeys.sh"
@@ -189,13 +228,17 @@ if [[ "$PLATFORM" == "macos" ]]; then
     bash "$SCRIPT_DIR/mac-apps/defaults/macos-defaults.sh"
     ok "macOS defaults applied"
 
-    info "Configuring always-on power settings..."
-    bash "$SCRIPT_DIR/mac-apps/pmset/always-on.sh"
-    ok "Power settings applied"
+    if [[ "$HEADLESS_MODE" == "1" ]]; then
+        info "Configuring always-on power settings (headless mode)..."
+        bash "$SCRIPT_DIR/mac-apps/pmset/always-on.sh"
+        ok "Power settings applied"
 
-    info "Tuning Screen Sharing (VNC fallback path)..."
-    bash "$SCRIPT_DIR/mac-apps/screensharing/tune.sh"
-    ok "Screen Sharing tuned"
+        info "Tuning Screen Sharing (VNC fallback path)..."
+        bash "$SCRIPT_DIR/mac-apps/screensharing/tune.sh"
+        ok "Screen Sharing tuned"
+    else
+        info "Skipping pmset + Screen Sharing tuning (non-headless mode)"
+    fi
 fi
 
 # ── Step 2: nvm (both platforms) ─────────────────────
@@ -352,6 +395,12 @@ fi
 echo ""
 echo "  Next steps:"
 echo ""
+if [[ "$PLATFORM" == "macos" ]] && [[ "$HEADLESS_MODE" == "1" ]]; then
+echo "  ⚠ If you haven't already: plug in an HDMI dummy plug"
+echo "    (~\$5 on Amazon). Forces a 4K framebuffer so Screen"
+echo "    Sharing is crisp. Single biggest remote-desktop win."
+echo ""
+fi
 if [[ "$PLATFORM" == "macos" ]]; then
 echo "  1. Install Element X from the Mac App Store"
 echo "     Open App Store → search \"Element X\" → click Get (id 1631335820)."

@@ -33,6 +33,13 @@ export CLAUDE_CODE_NO_FLICKER=1
 export BAT_THEME="Catppuccin Mocha"
 export EDITOR="nano"
 
+# Bitwarden SSH agent (keys live in the vault, not on disk)
+# Enable in: Bitwarden Desktop → Settings → SSH Agent
+if [[ "$OSTYPE" == darwin* ]]; then
+    [[ -S "$HOME/.bitwarden-ssh-agent.sock" ]] && \
+        export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
+fi
+
 # ── History ───────────────────────────────────────────
 # Persistent, shared history — required for zsh-autosuggestions to have
 # anything to suggest from.
