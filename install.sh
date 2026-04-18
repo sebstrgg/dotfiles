@@ -526,7 +526,88 @@ if command -v gh &>/dev/null; then
     fi
 fi
 
-# ── Step 9: Interactive Atuin setup ─────────────────
+# ── Step 9a: rbw configuration ──────────────────────
+# Interactive rbw configuration — runs on first use, idempotent after.
+setup_rbw() {
+    command -v rbw >/dev/null 2>&1 || return 0
+
+    # Detect already-configured
+    local existing_email
+    existing_email=$(rbw config show 2>/dev/null | grep -oP '(?<="email": ")[^"]*')
+    if [[ -n "$existing_email" && "$existing_email" != "null" ]]; then
+        ok "rbw already configured (email: $existing_email)"
+        # Still offer to unlock if locked
+        if ! rbw unlocked &>/dev/null; then
+            read -rp "Unlock rbw vault now? [y/N] " _yn
+            [[ "$_yn" =~ ^[Yy]$ ]] && rbw unlock
+        fi
+        return 0
+    fi
+
+    echo ""
+    echo "────────────────────────────────────────────────────────────"
+    echo "Bitwarden / Vaultwarden (rbw) — configure now?"
+    echo "  Needed for: SSH agent, secret fetching (bws/bwu/bwn), Atuin"
+    echo "  credentials sync across devices."
+    echo "  Skip with N to configure later via 'rbw config set' manually."
+    echo "────────────────────────────────────────────────────────────"
+    read -rp "Configure rbw now? [Y/n] " _yn
+    if [[ "$_yn" =~ ^[Nn]$ ]]; then
+        warn "Skipped rbw setup."
+        return 0
+    fi
+
+    # Load cached answer if any
+    local env_file="$HOME/.config/dotfiles/local.env"
+    local vaultwarden_url=""
+    local vaultwarden_email=""
+    if [[ -f "$env_file" ]]; then
+        # shellcheck disable=SC1090
+        source "$env_file"
+        vaultwarden_url="${VAULTWARDEN_URL:-}"
+        vaultwarden_email="${VAULTWARDEN_EMAIL:-}"
+    fi
+
+    if [[ -z "$vaultwarden_url" ]]; then
+        echo "  [1] Self-hosted Vaultwarden (enter URL)"
+        echo "  [2] Bitwarden Cloud (https://vault.bitwarden.com)"
+        read -rp "Choice [1/2]: " _choice
+        case "$_choice" in
+            1) read -rp "  Vaultwarden server URL: " vaultwarden_url ;;
+            2) vaultwarden_url="https://vault.bitwarden.com" ;;
+            *) warn "Invalid choice — skipping rbw setup"; return 0 ;;
+        esac
+    else
+        ok "Using cached Vaultwarden URL: $vaultwarden_url"
+    fi
+
+    [[ -z "$vaultwarden_email" ]] && read -rp "  Email: " vaultwarden_email
+
+    rbw config set email "$vaultwarden_email"
+    rbw config set base_url "$vaultwarden_url"
+    rbw config set pinentry pinentry-curses
+    ok "rbw config written"
+
+    # Cache for re-runs
+    mkdir -p "$(dirname "$env_file")"
+    {
+        grep -v '^VAULTWARDEN_' "$env_file" 2>/dev/null || true
+        echo "VAULTWARDEN_URL=$vaultwarden_url"
+        echo "VAULTWARDEN_EMAIL=$vaultwarden_email"
+    } > "$env_file.tmp" && mv "$env_file.tmp" "$env_file"
+
+    echo ""
+    info "Logging in to $vaultwarden_url — pinentry will prompt for master password..."
+    if rbw login; then
+        ok "rbw logged in"
+        rbw unlock && ok "rbw unlocked"
+        rbw sync 2>/dev/null || true
+    else
+        warn "rbw login failed — you can retry later with: rbw login"
+    fi
+}
+
+# ── Step 9b: Interactive Atuin setup ─────────────────
 # Runs once. Skips if already logged in.
 setup_atuin() {
     command -v atuin >/dev/null 2>&1 || return 0
@@ -578,29 +659,79 @@ setup_atuin() {
         1)
             read -rp "  Username: " _u
             read -rp "  Email: " _e
-            read -rsp "  Password: " _p; echo
+
+            local _p=""
+            local _store_in_vault=0
+            if command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
+                info "Auto-generating Atuin password via rbw..."
+                # rbw generate <LEN> <NAME> <USER> — generates password, saves to vault, prints to stdout
+                _p=$(rbw generate 40 atuin "$_u" 2>/dev/null || true)
+                if [[ -n "$_p" ]]; then
+                    _store_in_vault=1
+                    ok "Password generated and saved to vault as 'atuin'"
+                fi
+            fi
+            if [[ -z "$_p" ]]; then
+                warn "rbw unavailable — enter password manually"
+                read -rsp "  Password: " _p; echo
+            fi
+
             atuin register -u "$_u" -e "$_e" -p "$_p"
+
             echo ""
-            warn "SAVE THIS ENCRYPTION KEY — only chance to see it:"
-            atuin key
-            echo ""
-            warn "Store it in Bitwarden as a Secure Note named 'atuin-key'."
-            read -rp "Press enter when saved..." _
-            atuin import auto || true
-            atuin sync || true
+            info "Fetching Atuin encryption key..."
+            local _key
+            _key=$(atuin key)
+            if (( _store_in_vault )); then
+                # rbw add always opens an interactive editor — cannot pipe non-interactively.
+                # Instruct the user to store the key manually in Vaultwarden.
+                warn "SAVE THIS ATUIN ENCRYPTION KEY in Vaultwarden as a Secure Note named 'atuin-key':"
+                echo ""
+                echo "$_key"
+                echo ""
+                warn "  Open Vaultwarden → New Item → Secure Note → Name: atuin-key → paste key above"
+                read -rp "Press enter when saved in Vaultwarden..." _
+                rbw sync 2>/dev/null || true
+                ok "Atuin credentials stored. Run 'rbw sync' after saving the note."
+            else
+                warn "SAVE THIS ATUIN ENCRYPTION KEY — your ONLY chance to see it:"
+                echo ""
+                echo "$_key"
+                echo ""
+                warn "Store it in Bitwarden as a Secure Note named 'atuin-key'."
+                read -rp "Press enter when saved in a safe place..." _
+            fi
+
+            atuin import auto 2>/dev/null || true
+            atuin sync 2>/dev/null || true
             ;;
         2)
-            read -rp "  Username: " _u
-            read -rsp "  Password: " _p; echo
-            read -rsp "  Encryption key: " _k; echo
+            local _u="" _p="" _k=""
+            if command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
+                info "Pulling Atuin credentials from Vaultwarden..."
+                _u=$(rbw get --field username atuin 2>/dev/null || true)
+                _p=$(rbw get atuin 2>/dev/null || true)
+                _k=$(rbw get atuin-key 2>/dev/null || true)
+            fi
+
+            if [[ -z "$_u" || -z "$_p" || -z "$_k" ]]; then
+                warn "rbw unavailable or items missing — enter manually"
+                read -rp "  Username: " _u
+                read -rsp "  Password: " _p; echo
+                read -rsp "  Encryption key: " _k; echo
+            else
+                ok "Retrieved Atuin credentials from vault ($_u)"
+            fi
+
             atuin login -u "$_u" -p "$_p" -k "$_k"
-            atuin import auto || true
-            atuin sync || true
+            atuin import auto 2>/dev/null || true
+            atuin sync 2>/dev/null || true
             ;;
         *) warn "Skipped Atuin auth. Run 'atuin register' or 'atuin login' manually." ;;
     esac
 }
 
+setup_rbw
 setup_atuin
 
 echo ""
