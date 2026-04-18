@@ -33,11 +33,17 @@ export CLAUDE_CODE_NO_FLICKER=1
 export BAT_THEME="Catppuccin Mocha"
 export EDITOR="nano"
 
-# Bitwarden SSH agent (keys live in the vault, not on disk)
-# Enable in: Bitwarden Desktop → Settings → SSH Agent
+# ── SSH agent — Bitwarden-backed on both platforms ────
+# macOS: Bitwarden Desktop's built-in SSH agent (requires Desktop app running + SSH agent enabled in settings)
+# Linux / WSL: rbw's built-in SSH agent (requires `rbw unlock` in the session or another)
 if [[ "$OSTYPE" == darwin* ]]; then
-    [[ -S "$HOME/.bitwarden-ssh-agent.sock" ]] && \
-        export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
+    _bw_sock="$HOME/.bitwarden-ssh-agent.sock"
+    [[ -S "$_bw_sock" ]] && export SSH_AUTH_SOCK="$_bw_sock"
+    unset _bw_sock
+else
+    _rbw_sock="${XDG_RUNTIME_DIR:-/run/user/$UID}/rbw/ssh-agent-socket"
+    [[ -S "$_rbw_sock" ]] && export SSH_AUTH_SOCK="$_rbw_sock"
+    unset _rbw_sock
 fi
 
 # ── History ───────────────────────────────────────────
@@ -74,6 +80,16 @@ alias lt="eza --icons --tree --level=2"
 alias cat="bat --paging=never"
 alias catp="bat"
 
+# ── Bitwarden (rbw) shortcuts ─────────────────────────
+if command -v rbw &>/dev/null; then
+    alias bws='rbw get'                    # print password:      bws atuin
+    alias bwu='rbw get --field=username'   # print username
+    alias bwn='rbw get --field=notes'      # print notes (used for atuin key etc.)
+    alias bwl='rbw list'                   # list all vault items
+    # bwf <item> <field> — fetch a specific custom field
+    bwf() { rbw get --field="$2" "$1"; }
+fi
+
 # ── Tool initialization ──────────────────────────────
 # fzf shell integration (--zsh requires 0.48+, older versions use key-bindings/completion scripts)
 if fzf --zsh &>/dev/null; then
@@ -102,6 +118,12 @@ elif [[ "$OSTYPE" == linux* ]]; then
     source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
   [[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
     source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+fi
+
+# ── Atuin (shell history sync) ───────────────────────
+# Takes over Ctrl+R. Up-arrow remains host-local (configured in config.toml).
+if command -v atuin &>/dev/null; then
+    eval "$(atuin init zsh)"
 fi
 
 # ── Starship prompt (keep at end of .zshrc) ──────────

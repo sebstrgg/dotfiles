@@ -162,6 +162,50 @@ elif [[ "$PLATFORM" == "linux" ]]; then
         ok "Starship already installed"
     fi
 
+    # atuin (shell history sync) — not in apt, use official installer
+    if ! command -v atuin &>/dev/null; then
+        info "Installing atuin (shell history sync)..."
+        curl --proto '=https' --tlsv1.2 -LsSf https://setup.atuin.sh | sh
+        # Installer drops binary at ~/.atuin/bin/atuin — make sure PATH picks it up.
+        # (zshrc already sources this via $HOME/.atuin/bin if we ever need it; for now
+        # the installer edits shell rc files, which we then overwrite — so symlink
+        # the binary into ~/.local/bin for PATH stability.)
+        if [[ -x "$HOME/.atuin/bin/atuin" ]]; then
+            mkdir -p "$HOME/.local/bin"
+            ln -sf "$HOME/.atuin/bin/atuin" "$HOME/.local/bin/atuin"
+        fi
+        ok "atuin installed"
+    else
+        ok "atuin already installed"
+    fi
+
+    # rbw (Bitwarden CLI with built-in SSH agent) + pinentry prerequisite
+    if ! dpkg -l | grep -q '^ii  pinentry-curses '; then
+        info "Installing pinentry-curses (required by rbw)..."
+        sudo apt-get install -y -qq pinentry-curses
+        ok "pinentry-curses installed"
+    fi
+
+    if ! command -v rbw &>/dev/null; then
+        info "Installing rbw (Bitwarden CLI)..."
+        # Try apt first (Debian testing+ / Ubuntu 24.04+ has it packaged)
+        if apt-cache show rbw >/dev/null 2>&1; then
+            sudo apt-get install -y -qq rbw
+        else
+            # Fallback: cargo install. Requires Rust toolchain.
+            if ! command -v cargo &>/dev/null; then
+                warn "rbw not in apt and cargo not installed. Install Rust first:"
+                warn "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+                warn "Then re-run this installer, or run: cargo install --locked rbw"
+            else
+                cargo install --locked rbw
+            fi
+        fi
+        ok "rbw installed"
+    else
+        ok "rbw already installed"
+    fi
+
     # bat → batcat alias (Ubuntu may install bat as batcat)
     if command -v batcat &>/dev/null && ! command -v bat &>/dev/null; then
         mkdir -p "$HOME/.local/bin"
@@ -265,6 +309,7 @@ link_config "$SCRIPT_DIR/git/.gitconfig"          "$HOME/.gitconfig"
 link_config "$SCRIPT_DIR/bat/config"              "$HOME/.config/bat/config"
 link_config "$SCRIPT_DIR/nano/.nanorc"            "$HOME/.nanorc"
 link_config "$SCRIPT_DIR/vim/.vimrc"              "$HOME/.vimrc"
+link_config "$SCRIPT_DIR/atuin/config.toml"       "$HOME/.config/atuin/config.toml"
 
 # macOS-only configs
 if [[ "$PLATFORM" == "macos" ]]; then
@@ -401,6 +446,49 @@ echo "    (~\$5 on Amazon). Forces a 4K framebuffer so Screen"
 echo "    Sharing is crisp. Single biggest remote-desktop win."
 echo ""
 fi
+echo ""
+echo "  Atuin shell history sync:"
+echo ""
+echo "    Server:     https://atuin.wl7r.com (Tailscale-only)"
+echo "    Config:     ~/.config/atuin/config.toml (linked to this repo)"
+echo ""
+echo "    First device (create the account):"
+echo "      atuin register -u <username> -e <email>"
+echo "      atuin key      # PRINT AND SAVE — needed on every other device"
+echo "      atuin sync"
+echo ""
+echo "    Additional device (join the existing account):"
+echo "      atuin login -u <username> -k <key-from-first-device>"
+echo "      atuin import auto   # import local shell history into Atuin"
+echo "      atuin sync"
+echo ""
+echo "    Note: Atuin takes over Ctrl+R and Up-arrow. Ctrl+R = fuzzy search"
+echo "    across all machines, Up = session history on this machine only."
+echo ""
+echo "  Bitwarden + SSH key management:"
+echo ""
+if [[ "$PLATFORM" == "macos" ]]; then
+echo "    macOS uses Bitwarden Desktop's built-in SSH agent:"
+echo "      1. Open Bitwarden Desktop and log in"
+echo "      2. Settings → Security → enable 'SSH Agent'"
+echo "      3. Settings → Security → 'Unlock with Touch ID' (laptop)"
+echo "         or 'Never lock' (Mac mini, always-on)"
+echo "      4. System Settings → Login Items → ensure Bitwarden starts at login"
+echo "      5. Restart terminal — SSH_AUTH_SOCK now points at Bitwarden agent"
+echo ""
+echo "    Full setup + key migration runbook: docs/bitwarden-rbw-setup.md"
+else
+echo "    Linux / WSL uses rbw with built-in SSH agent:"
+echo "      rbw config set email <your-vaultwarden-email>"
+echo "      rbw config set base_url https://vault.wl7r.com"
+echo "      rbw config set pinentry pinentry-curses"
+echo "      rbw login           # enter master password via pinentry"
+echo "      rbw unlock          # starts the SSH agent"
+echo "      ssh-add -L          # verify vault SSH keys are visible"
+echo ""
+echo "    Full migration + usage runbook: docs/bitwarden-rbw-setup.md"
+fi
+echo ""
 if [[ "$PLATFORM" == "macos" ]]; then
 echo "  1. Install Element X from the Mac App Store"
 echo "     Open App Store → search \"Element X\" → click Get (id 1631335820)."

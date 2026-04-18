@@ -9,3 +9,9 @@
 
 # Design docs and plans (local-only, not shipped with the public repo)
 docs/
+# Exception: the Bitwarden+rbw runbook IS shipped (README.md links to it).
+# git won't recurse into an ignored directory, so we un-ignore the dir,
+# then re-ignore everything except the runbook.
+!docs/
+docs/*
+!docs/bitwarden-rbw-setup.md

@@ -12,7 +12,9 @@ Personal terminal environment for macOS — Ghostty, tmux, and modern CLI tools,
 | [eza](https://eza.rocks) | `ls` | File listing with icons and colors |
 | [bat](https://github.com/sharkdp/bat) | `cat` | Syntax highlighting and line numbers |
 | [delta](https://dandavison.github.io/delta/) | `git diff` | Beautiful side-by-side diffs |
-| [fzf](https://junegunn.github.io/fzf/) | Ctrl+R | Fuzzy finder for history, files, and more |
+| [fzf](https://junegunn.github.io/fzf/) | Ctrl+T | Fuzzy finder for files and more (Ctrl+R taken by atuin) |
+| [atuin](https://atuin.sh) | `Ctrl+R` | Encrypted shell history sync across all machines (self-hosted at atuin.wl7r.com) |
+| [Bitwarden Desktop](https://bitwarden.com/download/) / [rbw](https://github.com/doy/rbw) | ssh-agent / secret store | SSH keys + passwords synced from self-hosted Vaultwarden. Built-in SSH agent on both macOS (Desktop app) and Linux (rbw). |
 | [zoxide](https://github.com/ajeetdsouza/zoxide) | `cd` | Smart directory jumping that learns your habits |
 | [glow](https://github.com/charmbracelet/glow) | — | Render markdown beautifully in the terminal |
 | [nano](https://www.nano-editor.org) | macOS nano | Modern nano with syntax highlighting |
@@ -37,6 +39,31 @@ The install script:
 6. Optionally authenticates with GitHub CLI
 
 **After install**, open Ghostty and press `Ctrl+a I` (capital i) to install tmux plugins, then `Ctrl+a r` to reload.
+
+### Bitwarden + rbw
+
+SSH keys and secrets sync from self-hosted Vaultwarden at `vault.wl7r.com`.
+Full setup + migration runbook: [docs/bitwarden-rbw-setup.md](docs/bitwarden-rbw-setup.md).
+
+### Atuin — shell history sync
+
+Atuin syncs encrypted shell history across all machines via the self-hosted server at `https://atuin.wl7r.com` (Tailscale-only).
+
+**First device** (create the account):
+```bash
+atuin register -u <username> -e <email>
+atuin key      # PRINT AND SAVE — needed on every other device
+atuin sync
+```
+
+**Additional devices** (join the existing account):
+```bash
+atuin login -u <username> -k <key-from-first-device>
+atuin import auto   # import local shell history into Atuin
+atuin sync
+```
+
+`Ctrl+R` searches across all machines. Up-arrow stays session-local (configured in `atuin/config.toml`).
 
 ## Post-Install: What Changed
 
