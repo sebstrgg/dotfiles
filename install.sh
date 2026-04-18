@@ -470,6 +470,7 @@ echo ""
 fi
 echo ""
 echo "  Atuin history sync:    configured interactively above (or skipped)"
+echo "  Re-run setup prompts:  FORCE_SETUP=1 ./install.sh"
 echo "  Runbook:               docs/bitwarden-rbw-setup.md"
 echo ""
 echo "  Bitwarden + SSH key management:"
@@ -534,7 +535,7 @@ setup_rbw() {
     # Detect already-configured
     local existing_email
     existing_email=$(rbw config show 2>/dev/null | grep -oP '(?<="email": ")[^"]*')
-    if [[ -n "$existing_email" && "$existing_email" != "null" ]]; then
+    if [[ -n "$existing_email" && "$existing_email" != "null" && -z "${FORCE_SETUP:-}" ]]; then
         ok "rbw already configured (email: $existing_email)"
         # Still offer to unlock if locked
         if ! rbw unlocked &>/dev/null; then
@@ -543,6 +544,7 @@ setup_rbw() {
         fi
         return 0
     fi
+    [[ -n "${FORCE_SETUP:-}" && -n "$existing_email" ]] && info "FORCE_SETUP=1 — re-running rbw setup despite existing config"
 
     echo ""
     echo "────────────────────────────────────────────────────────────"
@@ -614,8 +616,11 @@ setup_atuin() {
 
     # `atuin status` exits 0 when logged in, non-zero otherwise
     if atuin status 2>/dev/null | grep -qE 'Logged in|Username:'; then
-        ok "Atuin already configured"
-        return 0
+        if [[ -z "${FORCE_SETUP:-}" ]]; then
+            ok "Atuin already configured"
+            return 0
+        fi
+        info "FORCE_SETUP=1 — re-running Atuin setup despite existing login"
     fi
 
     echo ""
