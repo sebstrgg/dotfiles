@@ -534,7 +534,7 @@ setup_rbw() {
 
     # Detect already-configured
     local existing_email
-    existing_email=$(rbw config show 2>/dev/null | grep -oP '(?<="email": ")[^"]*')
+    existing_email=$(rbw config show 2>/dev/null | grep -oP '(?<="email": ")[^"]*' || true)
     if [[ -n "$existing_email" && "$existing_email" != "null" && -z "${FORCE_SETUP:-}" ]]; then
         ok "rbw already configured (email: $existing_email)"
         # Still offer to unlock if locked
