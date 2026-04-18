@@ -13,7 +13,7 @@ Personal terminal environment for macOS — Ghostty, tmux, and modern CLI tools,
 | [bat](https://github.com/sharkdp/bat) | `cat` | Syntax highlighting and line numbers |
 | [delta](https://dandavison.github.io/delta/) | `git diff` | Beautiful side-by-side diffs |
 | [fzf](https://junegunn.github.io/fzf/) | Ctrl+T | Fuzzy finder for files and more (Ctrl+R taken by atuin) |
-| [atuin](https://atuin.sh) | `Ctrl+R` | Encrypted shell history sync across all machines (self-hosted at atuin.wl7r.com) |
+| [atuin](https://atuin.sh) | `Ctrl+R` | Encrypted shell history sync across all machines (self-hosted or Atuin Cloud) |
 | [Bitwarden Desktop](https://bitwarden.com/download/) / [rbw](https://github.com/doy/rbw) | ssh-agent / secret store | SSH keys + passwords synced from self-hosted Vaultwarden. Built-in SSH agent on both macOS (Desktop app) and Linux (rbw). |
 | [zoxide](https://github.com/ajeetdsouza/zoxide) | `cd` | Smart directory jumping that learns your habits |
 | [glow](https://github.com/charmbracelet/glow) | — | Render markdown beautifully in the terminal |
@@ -42,12 +42,12 @@ The install script:
 
 ### Bitwarden + rbw
 
-SSH keys and secrets sync from self-hosted Vaultwarden at `vault.wl7r.com`.
+SSH keys and secrets sync from self-hosted Vaultwarden (or Bitwarden cloud).
 Full setup + migration runbook: [docs/bitwarden-rbw-setup.md](docs/bitwarden-rbw-setup.md).
 
 ### Atuin — shell history sync
 
-Atuin syncs encrypted shell history across all machines via the self-hosted server at `https://atuin.wl7r.com` (Tailscale-only).
+Atuin syncs encrypted shell history across all machines. The installer prompts for your server URL (self-hosted or Atuin Cloud) and handles registration interactively.
 
 **First device** (create the account):
 ```bash

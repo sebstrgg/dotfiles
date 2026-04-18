@@ -2,14 +2,24 @@
 
 SSH keys and secrets are stored in self-hosted Vaultwarden. Both macOS and Linux use the Bitwarden vault as the SSH agent — no private key files on disk in normal operation.
 
+## Placeholders
+
+Replace these angle-bracket tokens with your own values throughout:
+
+| Placeholder | Example |
+|---|---|
+| `<your-vaultwarden-server>` | `https://vault.example.com` |
+| `<your-atuin-server>` | `https://atuin.example.com` |
+| `<your-email>` | `user@example.com` |
+
 ## Server
 
-- URL: `https://vault.wl7r.com`
+- URL: `<your-vaultwarden-server>`
 - Network: Tailscale-only (not reachable from the public internet)
-- Backend: Vaultwarden (self-hosted on oci-docker-01, behind Traefik IPAllowList)
+- Backend: Vaultwarden (self-hosted, behind Traefik IPAllowList)
 - SSH Key item type enabled via: `EXPERIMENTAL_CLIENT_FEATURE_FLAGS=ssh-key-vault-item,ssh-agent`
 
-**If the SSH Key item type disappears from the Vaultwarden UI after a container rebuild**, the env var was not carried over. Check the Vaultwarden container definition on oci-docker-01 and re-add the flag.
+**If the SSH Key item type disappears from the Vaultwarden UI after a container rebuild**, the env var was not carried over. Check the Vaultwarden container definition on your server and re-add the flag.
 
 ---
 
@@ -18,7 +28,7 @@ SSH keys and secrets are stored in self-hosted Vaultwarden. Both macOS and Linux
 ### Mac mini (headless, always-on)
 
 1. Install Bitwarden Desktop (in Brewfile)
-2. Log in to `vault.wl7r.com`
+2. Log in to `<your-vaultwarden-server>`
 3. Settings → Security → enable **SSH Agent**
 4. Settings → Security → set lock to **Never** (headless, always trusted)
 5. System Settings → General → Login Items → add Bitwarden so it starts at boot
@@ -29,7 +39,7 @@ SSH authorization prompts auto-approve because the vault stays unlocked.
 ### Mac laptop
 
 1. Install Bitwarden Desktop (in Brewfile)
-2. Log in to `vault.wl7r.com`
+2. Log in to `<your-vaultwarden-server>`
 3. Settings → Security → enable **SSH Agent**
 4. Keep the default lock timeout — Touch ID unlocks the agent when a session needs it
 5. System Settings → General → Login Items → add Bitwarden
@@ -42,8 +52,8 @@ rbw provides both a Bitwarden CLI and a built-in SSH agent that speaks the full 
 
 ```bash
 # Configure rbw (interactive — do not automate these)
-rbw config set email <your-vaultwarden-email>
-rbw config set base_url https://vault.wl7r.com
+rbw config set email <your-email>
+rbw config set base_url <your-vaultwarden-server>
 rbw config set pinentry pinentry-curses
 
 # Authenticate and unlock
@@ -69,7 +79,7 @@ The `.zshrc` SSH_AUTH_SOCK block picks up the rbw socket automatically after `rb
 2. **Add each key to Bitwarden:**
    - Open Bitwarden Desktop (Mac) or the Vaultwarden web UI (Linux via Tailscale)
    - New item → type **SSH Key** → paste the private key contents
-   - Name the item clearly: `ssh/github`, `ssh/oci-docker-01`, etc.
+   - Name the item clearly: `ssh/github`, `ssh/my-server`, etc.
    - Create a folder `ssh/` if it does not exist; move items into it
    - Save
 
@@ -141,7 +151,7 @@ On Linux, if the socket is missing: rbw-agent is not running. Run `rbw unlock` t
 
 **Vaultwarden UI does not show SSH Key item type**
 
-The container is missing `EXPERIMENTAL_CLIENT_FEATURE_FLAGS=ssh-key-vault-item,ssh-agent`. Check the Vaultwarden deployment on oci-docker-01 and add the env var.
+The container is missing `EXPERIMENTAL_CLIENT_FEATURE_FLAGS=ssh-key-vault-item,ssh-agent`. Check the Vaultwarden deployment on your server and add the env var.
 
 **Passphrase-protected keys fail to import**
 
@@ -155,5 +165,5 @@ Import the decrypted key into the vault. Optionally re-add a passphrase to the a
 
 ## Key hygiene
 
-- Never paste a private key into any web form over an untrusted network. Always use Tailscale when accessing `vault.wl7r.com`.
+- Never paste a private key into any web form over an untrusted network. Always use Tailscale when accessing `<your-vaultwarden-server>`.
 - Rotate SSH keys annually. Generate a new key in Bitwarden Desktop (or `ssh-keygen` + import), update `~/.ssh/authorized_keys` on each remote server, delete the old vault item.

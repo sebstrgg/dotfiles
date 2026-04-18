@@ -175,6 +175,16 @@ elif [[ "$PLATFORM" == "linux" ]]; then
             ln -sf "$HOME/.atuin/bin/atuin" "$HOME/.local/bin/atuin"
         fi
         ok "atuin installed"
+        # Strip the atuin installer's self-added shell rc modification — we handle
+        # PATH via our own symlink to ~/.local/bin and load atuin via our own
+        # `eval "$(atuin init zsh)"` line in zshrc. The installer's line is redundant
+        # and silently drifts our tracked .zshrc (since it's symlinked into place).
+        for _rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.profile"; do
+            if [[ -f "$_rc" ]] && grep -qF '.atuin/bin/env' "$_rc"; then
+                sed -i '/\.atuin\/bin\/env/d' "$_rc"
+                info "Removed atuin installer's auto-appended line from $_rc"
+            fi
+        done
     else
         ok "atuin already installed"
     fi
@@ -188,18 +198,30 @@ elif [[ "$PLATFORM" == "linux" ]]; then
 
     if ! command -v rbw &>/dev/null; then
         info "Installing rbw (Bitwarden CLI)..."
-        # Try apt first (Debian testing+ / Ubuntu 24.04+ has it packaged)
+        # Path 1: apt (Debian testing+)
         if apt-cache show rbw >/dev/null 2>&1; then
             sudo apt-get install -y -qq rbw
         else
-            # Fallback: cargo install. Requires Rust toolchain.
+            # Path 2: cargo install. Auto-install Rust toolchain if missing.
             if ! command -v cargo &>/dev/null; then
-                warn "rbw not in apt and cargo not installed. Install Rust first:"
-                warn "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-                warn "Then re-run this installer, or run: cargo install --locked rbw"
-            else
-                cargo install --locked rbw
+                info "Installing Rust toolchain (required to build rbw)..."
+                curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+                    | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path
+                # Make cargo available in THIS shell session
+                if [[ -f "$HOME/.cargo/env" ]]; then
+                    # shellcheck disable=SC1091
+                    source "$HOME/.cargo/env"
+                fi
+                ok "Rust toolchain installed"
             fi
+            info "Building rbw via cargo (2-5 minutes)..."
+            cargo install --locked rbw
+        fi
+        # Symlink to ~/.local/bin for PATH stability (matches atuin handling)
+        if [[ -x "$HOME/.cargo/bin/rbw" ]]; then
+            mkdir -p "$HOME/.local/bin"
+            ln -sf "$HOME/.cargo/bin/rbw" "$HOME/.local/bin/rbw"
+            ln -sf "$HOME/.cargo/bin/rbw-agent" "$HOME/.local/bin/rbw-agent" 2>/dev/null || true
         fi
         ok "rbw installed"
     else
@@ -309,7 +331,7 @@ link_config "$SCRIPT_DIR/git/.gitconfig"          "$HOME/.gitconfig"
 link_config "$SCRIPT_DIR/bat/config"              "$HOME/.config/bat/config"
 link_config "$SCRIPT_DIR/nano/.nanorc"            "$HOME/.nanorc"
 link_config "$SCRIPT_DIR/vim/.vimrc"              "$HOME/.vimrc"
-link_config "$SCRIPT_DIR/atuin/config.toml"       "$HOME/.config/atuin/config.toml"
+# atuin/config.toml is NOT symlinked here — setup_atuin() writes it via sed substitution
 
 # macOS-only configs
 if [[ "$PLATFORM" == "macos" ]]; then
@@ -447,23 +469,8 @@ echo "    Sharing is crisp. Single biggest remote-desktop win."
 echo ""
 fi
 echo ""
-echo "  Atuin shell history sync:"
-echo ""
-echo "    Server:     https://atuin.wl7r.com (Tailscale-only)"
-echo "    Config:     ~/.config/atuin/config.toml (linked to this repo)"
-echo ""
-echo "    First device (create the account):"
-echo "      atuin register -u <username> -e <email>"
-echo "      atuin key      # PRINT AND SAVE — needed on every other device"
-echo "      atuin sync"
-echo ""
-echo "    Additional device (join the existing account):"
-echo "      atuin login -u <username> -k <key-from-first-device>"
-echo "      atuin import auto   # import local shell history into Atuin"
-echo "      atuin sync"
-echo ""
-echo "    Note: Atuin takes over Ctrl+R and Up-arrow. Ctrl+R = fuzzy search"
-echo "    across all machines, Up = session history on this machine only."
+echo "  Atuin history sync:    configured interactively above (or skipped)"
+echo "  Runbook:               docs/bitwarden-rbw-setup.md"
 echo ""
 echo "  Bitwarden + SSH key management:"
 echo ""
@@ -480,7 +487,7 @@ echo "    Full setup + key migration runbook: docs/bitwarden-rbw-setup.md"
 else
 echo "    Linux / WSL uses rbw with built-in SSH agent:"
 echo "      rbw config set email <your-vaultwarden-email>"
-echo "      rbw config set base_url https://vault.wl7r.com"
+echo "      rbw config set base_url <your-vaultwarden-url>"
 echo "      rbw config set pinentry pinentry-curses"
 echo "      rbw login           # enter master password via pinentry"
 echo "      rbw unlock          # starts the SSH agent"
@@ -518,3 +525,90 @@ if command -v gh &>/dev/null; then
         fi
     fi
 fi
+
+# ── Step 9: Interactive Atuin setup ─────────────────
+# Runs once. Skips if already logged in.
+setup_atuin() {
+    command -v atuin >/dev/null 2>&1 || return 0
+
+    # `atuin status` exits 0 when logged in, non-zero otherwise
+    if atuin status 2>/dev/null | grep -qE 'Logged in|Username:'; then
+        ok "Atuin already configured"
+        return 0
+    fi
+
+    echo ""
+    echo "────────────────────────────────────────────────────────────"
+    echo "Atuin shell history sync — choose a server:"
+    echo ""
+    echo "  [1] Self-hosted (enter URL)"
+    echo "  [2] Atuin Cloud (https://api.atuin.sh)"
+    echo "  [3] Skip — set up manually later"
+    echo "────────────────────────────────────────────────────────────"
+    read -rp "Choice [1/2/3]: " _atuin_server_choice
+
+    local atuin_url=""
+    case "${_atuin_server_choice}" in
+        1)
+            read -rp "  Atuin server URL (e.g. https://atuin.example.com): " atuin_url
+            [[ -z "$atuin_url" ]] && { warn "No URL entered — skipping Atuin setup"; return 0; }
+            ;;
+        2) atuin_url="https://api.atuin.sh" ;;
+        *) warn "Skipped Atuin setup. Run 'atuin register' or 'atuin login' manually."; return 0 ;;
+    esac
+
+    # Write the URL into the actual atuin config (template + substitution)
+    mkdir -p "$HOME/.config/atuin"
+    sed "s|{{ATUIN_SYNC_ADDRESS}}|$atuin_url|g" \
+        "$SCRIPT_DIR/atuin/config.toml" \
+        > "$HOME/.config/atuin/config.toml"
+    ok "Atuin config written with server: $atuin_url"
+
+    # Cache the answer for re-runs
+    mkdir -p "$HOME/.config/dotfiles"
+    echo "ATUIN_SYNC_ADDRESS=$atuin_url" >> "$HOME/.config/dotfiles/local.env"
+
+    echo ""
+    echo "  [1] Register new account (first device)"
+    echo "  [2] Log in to existing account (other devices — needs encryption key)"
+    echo "  [3] Skip — register/login manually"
+    read -rp "Choice [1/2/3]: " _atuin_auth_choice
+
+    case "${_atuin_auth_choice}" in
+        1)
+            read -rp "  Username: " _u
+            read -rp "  Email: " _e
+            read -rsp "  Password: " _p; echo
+            atuin register -u "$_u" -e "$_e" -p "$_p"
+            echo ""
+            warn "SAVE THIS ENCRYPTION KEY — only chance to see it:"
+            atuin key
+            echo ""
+            warn "Store it in Bitwarden as a Secure Note named 'atuin-key'."
+            read -rp "Press enter when saved..." _
+            atuin import auto || true
+            atuin sync || true
+            ;;
+        2)
+            read -rp "  Username: " _u
+            read -rsp "  Password: " _p; echo
+            read -rsp "  Encryption key: " _k; echo
+            atuin login -u "$_u" -p "$_p" -k "$_k"
+            atuin import auto || true
+            atuin sync || true
+            ;;
+        *) warn "Skipped Atuin auth. Run 'atuin register' or 'atuin login' manually." ;;
+    esac
+}
+
+setup_atuin
+
+echo ""
+echo -e "${YELLOW}╔════════════════════════════════════════════════════════╗${NC}"
+echo -e "${YELLOW}║  RESTART YOUR SHELL NOW to load the new configuration ║${NC}"
+echo -e "${YELLOW}║                                                        ║${NC}"
+echo -e "${YELLOW}║      exec zsh                                          ║${NC}"
+echo -e "${YELLOW}║                                                        ║${NC}"
+echo -e "${YELLOW}║  (or close this terminal and open a new one)           ║${NC}"
+echo -e "${YELLOW}╚════════════════════════════════════════════════════════╝${NC}"
+echo ""

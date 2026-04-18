@@ -1,5 +1,5 @@
 {
-  "email": "REPLACE_WITH_YOUR_VAULTWARDEN_EMAIL",
-  "base_url": "https://vault.wl7r.com",
+  "email": "REPLACE_WITH_YOUR_EMAIL",
+  "base_url": "REPLACE_WITH_YOUR_VAULTWARDEN_URL",
   "pinentry": "pinentry-curses"
 }
