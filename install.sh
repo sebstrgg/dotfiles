@@ -643,11 +643,30 @@ setup_atuin() {
         *) warn "Skipped Atuin setup. Run 'atuin register' or 'atuin login' manually."; return 0 ;;
     esac
 
-    # Write the URL into the actual atuin config (template + substitution)
+    # Write the URL into the actual atuin config.
+    # IMPORTANT: write to temp + mv, NOT direct redirect. If the destination
+    # is a stale symlink pointing back at the template (legacy state from
+    # pre-4ae7cde installs), shell truncates the template before sed reads
+    # — corrupting both files. Lesson learned the hard way.
     mkdir -p "$HOME/.config/atuin"
+    local _atuin_dest="$HOME/.config/atuin/config.toml"
+    # If destination is a symlink (legacy), nuke it — we're replacing with a real file
+    if [[ -L "$_atuin_dest" ]]; then
+        info "Removing stale symlink at $_atuin_dest (legacy from pre-4ae7cde install.sh)"
+        rm -f "$_atuin_dest"
+    fi
+    local _atuin_tmp
+    _atuin_tmp=$(mktemp "$HOME/.config/atuin/config.toml.XXXXXX")
     sed "s|{{ATUIN_SYNC_ADDRESS}}|$atuin_url|g" \
         "$SCRIPT_DIR/atuin/config.toml" \
-        > "$HOME/.config/atuin/config.toml"
+        > "$_atuin_tmp"
+    # Sanity: the template had content and the substituted result is non-empty
+    if [[ ! -s "$_atuin_tmp" ]]; then
+        warn "Generated atuin config is empty — template at $SCRIPT_DIR/atuin/config.toml may be corrupted"
+        rm -f "$_atuin_tmp"
+        return 1
+    fi
+    mv -f "$_atuin_tmp" "$_atuin_dest"
     ok "Atuin config written with server: $atuin_url"
 
     # Cache the answer for re-runs
