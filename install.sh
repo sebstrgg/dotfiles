@@ -706,23 +706,35 @@ setup_atuin() {
             info "Fetching Atuin encryption key..."
             local _key
             _key=$(atuin key)
+
             if (( _store_in_vault )); then
-                # rbw add always opens an interactive editor — cannot pipe non-interactively.
-                # Instruct the user to store the key manually in Vaultwarden.
-                warn "SAVE THIS ATUIN ENCRYPTION KEY in Vaultwarden as a Secure Note named 'atuin-key':"
-                echo ""
-                echo "$_key"
-                echo ""
-                warn "  Open Vaultwarden → New Item → Secure Note → Name: atuin-key → paste key above"
-                read -rp "Press enter when saved in Vaultwarden..." _
-                rbw sync 2>/dev/null || true
-                ok "Atuin credentials stored. Run 'rbw sync' after saving the note."
+                info "Storing encryption key in Vaultwarden as 'atuin-key' (Login item, key as password)..."
+                # rbw add opens $EDITOR with a temp file; first line becomes the password.
+                # Override EDITOR with a script that writes the key + exits. rbw then stores it.
+                local _rbw_editor
+                _rbw_editor=$(mktemp)
+                cat > "$_rbw_editor" <<'EOSCRIPT'
+#!/bin/sh
+# rbw passes the temp file path as $1; overwrite with first-line-password.
+printf '%s\n' "$RBW_AUTO_VALUE" > "$1"
+EOSCRIPT
+                chmod +x "$_rbw_editor"
+                if RBW_AUTO_VALUE="$_key" EDITOR="$_rbw_editor" rbw add atuin-key 2>/dev/null; then
+                    rbw sync 2>/dev/null || true
+                    ok "Encryption key stored in vault as 'atuin-key'"
+                else
+                    warn "Couldn't auto-store atuin-key — save manually:"
+                    echo ""
+                    echo "$_key"
+                    echo ""
+                    read -rp "Press enter when saved in Vaultwarden as Secure Note 'atuin-key'..." _
+                fi
+                rm -f "$_rbw_editor"
             else
                 warn "SAVE THIS ATUIN ENCRYPTION KEY — your ONLY chance to see it:"
                 echo ""
                 echo "$_key"
                 echo ""
-                warn "Store it in Bitwarden as a Secure Note named 'atuin-key'."
                 read -rp "Press enter when saved in a safe place..." _
             fi
 
