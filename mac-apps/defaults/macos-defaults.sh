@@ -65,12 +65,23 @@ defaults write com.apple.screensaver askForPassword -int 1
 defaults write com.apple.screensaver askForPasswordDelay -int 0
 
 # ── Mail.app ─────────────────────────────────────────
-defaults write com.apple.mail DisableSendAnimations -bool true
-defaults write com.apple.mail DisableReplyAnimations -bool true
-defaults write com.apple.mail AddressesIncludeNameOnPasteboard -bool false
-defaults write com.apple.mail ConversationViewSortDescending -bool true
-defaults write com.apple.mail DisableInlineAttachmentViewing -bool true
-defaults write com.apple.mail SpellCheckingBehavior -string "InlineSpellCheckingEnabled"
+# Modern macOS sandboxes Mail's prefs container — writing requires
+# Full Disk Access granted to the Terminal running this script.
+# Probe with a harmless read; skip the block with a warn if denied.
+if defaults read com.apple.mail DisableSendAnimations &>/dev/null || \
+   defaults write com.apple.mail __probe__ -bool true 2>/dev/null; then
+    defaults delete com.apple.mail __probe__ 2>/dev/null || true
+    defaults write com.apple.mail DisableSendAnimations -bool true
+    defaults write com.apple.mail DisableReplyAnimations -bool true
+    defaults write com.apple.mail AddressesIncludeNameOnPasteboard -bool false
+    defaults write com.apple.mail ConversationViewSortDescending -bool true
+    defaults write com.apple.mail DisableInlineAttachmentViewing -bool true
+    defaults write com.apple.mail SpellCheckingBehavior -string "InlineSpellCheckingEnabled"
+else
+    echo "  ⚠ Skipping Mail.app defaults — grant Full Disk Access to your Terminal"
+    echo "    (System Settings → Privacy & Security → Full Disk Access) and re-run"
+    echo "    if you want these tweaks applied. Not critical."
+fi
 
 # ── Screen saver (disabled — headless wastes CPU even in Screen Sharing) ──
 defaults -currentHost write com.apple.screensaver idleTime -int 0
