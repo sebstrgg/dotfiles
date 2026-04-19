@@ -664,7 +664,20 @@ setup_atuin() {
 
     mkdir -p "$HOME/.config/dotfiles"
     echo "ATUIN_SYNC_ADDRESS=$atuin_url" >> "$HOME/.config/dotfiles/local.env"
-
+    # Pull stored creds: new shape (notes=key), legacy fallback (atuin-key item).
+    _pull_atuin_creds() {
+        if [[ "$PLATFORM" == "macos" ]] && command -v bw >/dev/null 2>&1 && [[ -n "${BW_SESSION:-}" ]]; then
+            _u=$(bw get username atuin 2>/dev/null || true)
+            _p=$(bw get password atuin 2>/dev/null || true)
+            _k=$(bw get notes atuin 2>/dev/null || true)
+            [[ -z "$_k" ]] && _k=$(bw get password atuin-key 2>/dev/null || true)
+        elif command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
+            _u=$(rbw get --field username atuin 2>/dev/null || true)
+            _p=$(rbw get atuin 2>/dev/null || true)
+            _k=$(rbw get --field notes atuin 2>/dev/null || true)
+            [[ -z "$_k" ]] && _k=$(rbw get atuin-key 2>/dev/null || true)
+        fi
+    }
     echo "  [1] Register new account  [2] Log in (needs key)  [3] Skip"
     read -rp "  Auth choice [1/2/3]: " _atuin_auth_choice
 
@@ -673,101 +686,102 @@ setup_atuin() {
             read -rp "  Username: " _u
             read -rp "  Email: " _e
 
-            local _p="" _store_in_vault=0
+            # Guard: check for existing vault item — duplicates make 'bw get' fail.
+            local _vault_exists=0
             if [[ "$PLATFORM" == "macos" ]] && command -v bw >/dev/null 2>&1 && [[ -n "${BW_SESSION:-}" ]]; then
-                info "Auto-generating Atuin password via bw..."
-                _p=$(bw generate --length 40 --uppercase --lowercase --number --special 2>/dev/null || true)
-                if [[ -n "$_p" ]]; then
-                    _store_in_vault=1
-                    local _item_json
-                    _item_json=$(bw get template item | jq \
-                        --arg n "atuin" --arg u "$_u" --arg p "$_p" \
-                        '.name=$n | .type=1 | .login.username=$u | .login.password=$p | .login.uris=[]')
-                    if echo "$_item_json" | bw encode | bw create item >/dev/null 2>&1; then
-                        bw sync >/dev/null 2>&1 || true
-                        ok "Password generated and saved to vault as 'atuin'"
-                    else
-                        warn "bw create item failed — password generated but not stored"
-                        _store_in_vault=0
-                    fi
+                bw sync >/dev/null 2>&1 || true; bw get item atuin &>/dev/null && _vault_exists=1
+            elif command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
+                rbw sync 2>/dev/null || true; rbw get atuin &>/dev/null && _vault_exists=1
+            fi
+
+            if (( _vault_exists )); then
+                warn "Vault already contains an 'atuin' item."
+                printf '  What next?\n    [1] Overwrite    (delete existing, create fresh)\n    [2] Use existing (skip create; log in with stored creds)\n    [3] Abort\n'
+                local _dedup_choice
+                read -rp "  Choice: " _dedup_choice
+                case "$_dedup_choice" in
+                    1)
+                        info "Deleting existing 'atuin' vault item..."
+                        if [[ "$PLATFORM" == "macos" ]] && [[ -n "${BW_SESSION:-}" ]]; then
+                            local _del_id; _del_id=$(bw get item atuin 2>/dev/null | jq -r '.id' || true)
+                            if [[ -n "$_del_id" ]]; then bw delete item "$_del_id" >/dev/null 2>&1 || true; bw sync >/dev/null 2>&1 || true; fi
+                        else
+                            rbw remove atuin 2>/dev/null || true; rbw sync 2>/dev/null || true
+                        fi
+                        ;;
+                    2)
+                        local _u="" _p="" _k=""
+                        _pull_atuin_creds
+                        if [[ -z "$_u" || -z "$_p" || -z "$_k" ]]; then
+                            warn "Vault pull failed — enter credentials manually."
+                            read -rp "  Username: " _u
+                            read -rsp "  Password: " _p; echo
+                            read -rsp "  Encryption key: " _k; echo
+                        fi
+                        retry_menu "atuin login" atuin login -u "$_u" -p "$_p" -k "$_k"
+                        atuin import auto 2>/dev/null || true; atuin sync 2>/dev/null || true
+                        return 0
+                        ;;
+                    *) abort_clean "User aborted at: Atuin vault dedup" ;;
+                esac
+            fi
+
+            # Generate password locally — avoids rbw generate creating a duplicate entry.
+            local _p; _p=$(openssl rand -base64 40 | tr -d '/+=\n' | head -c 40)
+            retry_menu "atuin register" atuin register -u "$_u" -e "$_e" -p "$_p"
+            local _key; _key=$(atuin key)
+            # Store username + password + key in ONE vault item; key in notes field.
+            if [[ "$PLATFORM" == "macos" ]] && command -v bw >/dev/null 2>&1 && [[ -n "${BW_SESSION:-}" ]]; then
+                local _item_json
+                _item_json=$(bw get template item | jq \
+                    --arg n "atuin" --arg u "$_u" --arg p "$_p" --arg k "$_key" \
+                    '.name=$n | .type=1 | .login.username=$u | .login.password=$p | .login.uris=[] | .notes=$k')
+                if echo "$_item_json" | bw encode | bw create item >/dev/null 2>&1; then
+                    bw sync >/dev/null 2>&1 || true; ok "atuin stored in vault (username + password + key in notes)"
+                else
+                    warn "Couldn't store atuin item — save these manually:"
+                    echo "  Password:        $_p"; echo "  Encryption key:  $_key"
+                    read -rp "  Press enter when saved somewhere safe: " _
                 fi
             elif command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
-                info "Auto-generating Atuin password via rbw..."
-                # rbw generate <LEN> <NAME> <USER> — generates password, saves to vault, prints to stdout
-                _p=$(rbw generate 40 atuin "$_u" 2>/dev/null || true)
-                [[ -n "$_p" ]] && _store_in_vault=1 && ok "Password generated and saved to vault as 'atuin'"
-            fi
-            if [[ -z "$_p" ]]; then
-                warn "Auto-generation unavailable — enter password manually"
-                read -rsp "  Password: " _p; echo
-            fi
-
-            retry_menu "atuin register" atuin register -u "$_u" -e "$_e" -p "$_p"
-
-            info "Fetching Atuin encryption key..."
-            local _key; _key=$(atuin key)
-
-            if (( _store_in_vault )); then
-                if [[ "$PLATFORM" == "macos" ]] && command -v bw >/dev/null 2>&1 && [[ -n "${BW_SESSION:-}" ]]; then
-                    info "Storing encryption key in Vaultwarden as 'atuin-key'..."
-                    local _key_json
-                    _key_json=$(bw get template item | jq \
-                        --arg n "atuin-key" --arg p "$_key" \
-                        '.name=$n | .type=1 | .login.password=$p | .login.uris=[]')
-                    if echo "$_key_json" | bw encode | bw create item >/dev/null 2>&1; then
-                        bw sync >/dev/null 2>&1 || true
-                        ok "Encryption key stored in vault as 'atuin-key'"
-                    else
-                        warn "Couldn't auto-store atuin-key — save manually:"
-                        echo ""; echo "$_key"; echo ""
-                        read -rp "  Press enter when saved in Bitwarden..." _
-                    fi
-                else
-                    info "Storing encryption key in Vaultwarden as 'atuin-key'..."
-                    # rbw add opens $EDITOR with a temp file; first line becomes the password.
-                    # Override EDITOR with a one-shot script that writes the key + exits.
-                    local _rbw_editor; _rbw_editor=$(mktemp)
-                    cat > "$_rbw_editor" <<'EOSCRIPT'
+                        # rbw add: first line = password, blank line separator, rest = notes.
+                local _rbw_editor; _rbw_editor=$(mktemp)
+                cat > "$_rbw_editor" <<'EOSCRIPT'
 #!/bin/sh
-# rbw passes the temp file path as $1; overwrite with first-line-password.
-printf '%s\n' "$RBW_AUTO_VALUE" > "$1"
+printf '%s\n\n%s\n' "$RBW_PW" "$RBW_KEY" > "$1"
 EOSCRIPT
-                    chmod +x "$_rbw_editor"
-                    if RBW_AUTO_VALUE="$_key" EDITOR="$_rbw_editor" rbw add atuin-key 2>/dev/null; then
-                        rbw sync 2>/dev/null || true
-                        ok "Encryption key stored in vault as 'atuin-key'"
-                    else
-                        warn "Couldn't auto-store atuin-key — save manually:"
-                        echo ""; echo "$_key"; echo ""
-                        read -rp "  Press enter when saved in Vaultwarden as 'atuin-key'..." _
-                    fi
-                    rm -f "$_rbw_editor"
+                chmod +x "$_rbw_editor"
+                if RBW_PW="$_p" RBW_KEY="$_key" EDITOR="$_rbw_editor" rbw add --username "$_u" atuin 2>/dev/null; then
+                    rbw sync 2>/dev/null || true; ok "atuin stored in vault (username + password + key in notes)"
+                else
+                    warn "Couldn't store atuin item — save these manually:"
+                    echo "  Password:        $_p"; echo "  Encryption key:  $_key"
+                    read -rp "  Press enter when saved somewhere safe: " _
                 fi
+                rm -f "$_rbw_editor"
             else
-                warn "SAVE THIS ATUIN ENCRYPTION KEY — your ONLY chance to see it:"
-                echo ""; echo "$_key"; echo ""
-                read -rp "  Press enter when saved in a safe place..." _
+                warn "Vault not available — save these manually:"
+                echo "  Password:        $_p"; echo "  Encryption key:  $_key"
+                read -rp "  Press enter when saved somewhere safe: " _
             fi
-
-            atuin import auto 2>/dev/null || true
-            atuin sync 2>/dev/null || true
+            atuin import auto 2>/dev/null || true; atuin sync 2>/dev/null || true
             ;;
         2)
+            info "Pulling Atuin credentials from vault..."
+            [[ "$PLATFORM" == "macos" ]] && { bw sync >/dev/null 2>&1 || true; }
             local _u="" _p="" _k=""
-            if [[ "$PLATFORM" == "macos" ]] && command -v bw >/dev/null 2>&1 && [[ -n "${BW_SESSION:-}" ]]; then
-                info "Pulling Atuin credentials from Bitwarden..."
-                bw sync >/dev/null 2>&1 || true
-                _u=$(bw get username atuin 2>/dev/null || true)
-                _p=$(bw get password atuin 2>/dev/null || true)
-                _k=$(bw get password atuin-key 2>/dev/null || true)
-            elif command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
-                info "Pulling Atuin credentials from Vaultwarden via rbw..."
-                _u=$(rbw get --field username atuin 2>/dev/null || true)
-                _p=$(rbw get atuin 2>/dev/null || true)
-                _k=$(rbw get atuin-key 2>/dev/null || true)
-            fi
+            _pull_atuin_creds
             if [[ -z "$_u" || -z "$_p" || -z "$_k" ]]; then
-                warn "Auto-pull unavailable or items missing — enter manually"
+                warn "Auto-pull from vault failed — enter manually."
+                if [[ "$PLATFORM" == "macos" ]] && [[ -n "${BW_SESSION:-}" ]]; then
+                    [[ -z "$_u" ]] && { echo "  username:"; bw get username atuin 2>&1 | sed 's/^/    /' || true; }
+                    [[ -z "$_p" ]] && { echo "  password:"; bw get password atuin 2>&1 | sed 's/^/    /' || true; }
+                    [[ -z "$_k" ]] && echo "  notes (new) / atuin-key (legacy): both empty"
+                elif command -v rbw >/dev/null 2>&1; then
+                    [[ -z "$_u" ]] && { echo "  username:"; rbw get --field username atuin 2>&1 | sed 's/^/    /' || true; }
+                    [[ -z "$_p" ]] && { echo "  password:"; rbw get atuin 2>&1 | sed 's/^/    /' || true; }
+                    [[ -z "$_k" ]] && echo "  notes (new) / atuin-key (legacy): both empty"
+                fi
                 read -rp "  Username: " _u
                 read -rsp "  Password: " _p; echo
                 read -rsp "  Encryption key: " _k; echo
@@ -775,8 +789,7 @@ EOSCRIPT
                 ok "Retrieved atuin credentials from vault ($_u)"
             fi
             retry_menu "atuin login" atuin login -u "$_u" -p "$_p" -k "$_k"
-            atuin import auto 2>/dev/null || true
-            atuin sync 2>/dev/null || true
+            atuin import auto 2>/dev/null || true; atuin sync 2>/dev/null || true
             ;;
         *) warn "Skipped Atuin auth. Run 'atuin register' or 'atuin login' manually."; SKIPPED_ATUIN=1 ;;
     esac
@@ -836,11 +849,11 @@ else _chk "atuin status" warn atuin status; fi
 
 info "Checking vault items..."
 if [[ "$PLATFORM" == "macos" ]] && [[ -n "${BW_SESSION:-}" ]]; then
-    _chk "vault item 'atuin'"     warn bw get item atuin
-    _chk "vault item 'atuin-key'" warn bw get item atuin-key
+    _chk "vault item 'atuin' (username)"  warn bw get username atuin
+    _chk "vault item 'atuin' (notes/key)" warn bw get notes atuin
 elif command -v rbw &>/dev/null && rbw unlocked &>/dev/null; then
-    _chk "vault item 'atuin'"     warn rbw get atuin
-    _chk "vault item 'atuin-key'" warn rbw get atuin-key
+    _chk "vault item 'atuin'"       warn rbw get atuin
+    _chk "vault item 'atuin' notes" warn rbw get --field notes atuin
 else
     echo -e "  ${YELLOW}⚠${NC} vault items — vault not unlocked, skipping check"
 fi

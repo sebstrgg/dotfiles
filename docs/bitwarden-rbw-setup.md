@@ -104,21 +104,32 @@ The `.zshrc` SSH_AUTH_SOCK block picks up the rbw socket automatically after `rb
 
 ## Atuin credentials
 
-Store Atuin credentials in the vault so any new device can onboard without the key file.
+Store Atuin credentials as a single vault item so any new device can onboard
+without a key file.
 
-- **Login item** named `atuin`: username = atuin username, password = atuin password
-- **Login item** named `atuin-key`: password field = the sync encryption key from `atuin key`
+- **Login item** named `atuin`:
+  - username: your Atuin username
+  - password: your Atuin password
+  - notes: the encryption key returned by `atuin key`
 
 Retrieval on a new device:
 
-**macOS:** Open Bitwarden Desktop → find the `atuin` item → copy username (⌘⇧C), copy password; find `atuin-key` → copy password (the encryption key). Paste into the `atuin login` command.
+**macOS:** Open Bitwarden Desktop → find the `atuin` item → copy username, copy
+password, reveal notes and copy the encryption key. Paste each into the
+`atuin login` command.
 
 **Linux / WSL:**
+
 ```bash
+rbw get --field username atuin      # username
 rbw get atuin                       # password
-rbw get --field=username atuin      # username
-rbw get atuin-key                   # the encryption key
+rbw get --field notes atuin         # encryption key
 ```
+
+Older installs may still have a separate `atuin-key` vault item — the
+installer's login flow falls back to reading that for backwards compatibility.
+Clean up by copying the key into the main `atuin` item's notes field and
+deleting the standalone `atuin-key` item.
 
 ---
 
