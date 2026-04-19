@@ -100,13 +100,22 @@ echo ""
 # ── Step 1: Install packages ────────────────────────
 if [[ "$PLATFORM" == "macos" ]]; then
     info "Checking for Homebrew..."
-    if command -v brew &>/dev/null; then
-        ok "Homebrew already installed"
-    else
+    if ! command -v brew &>/dev/null; then
         info "Installing Homebrew..."
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        eval "$(/opt/homebrew/bin/brew shellenv)"
         ok "Homebrew installed"
+    else
+        ok "Homebrew already installed"
+    fi
+
+    # Refresh shell env so /opt/homebrew/bin (or /usr/local/bin on Intel) is
+    # guaranteed on PATH for the rest of this script — fixes silent failures
+    # of post-bundle `command -v <pkg>` checks when install.sh was invoked
+    # from a shell that didn't already have brew on PATH.
+    if [[ -x /opt/homebrew/bin/brew ]]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [[ -x /usr/local/bin/brew ]]; then
+        eval "$(/usr/local/bin/brew shellenv)"
     fi
 
     info "Installing packages from Brewfile..."

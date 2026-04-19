@@ -45,6 +45,9 @@ brew "mosh"         # mobile shell (SSH replacement with roaming)
 # Fonts
 cask "font-jetbrains-mono-nerd-font"
 
+# Terminal
+cask "ghostty"           # GPU-accelerated terminal — config symlinked by install.sh
+
 # ── GUI apps (macOS only) ────────────────────────────────────────
 # Productivity
 cask "alfred"              # Spotlight replacement (Powerpack license entered manually)
