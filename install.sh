@@ -888,6 +888,18 @@ echo ""
 if [[ "$PLATFORM" == "macos" ]] && [[ "$HEADLESS_MODE" == "1" ]]; then
 echo -e "  ${YELLOW}⚠${NC} Plug in an HDMI dummy plug (~\$5) for crisp 4K Screen Sharing."
 fi
+echo ""
+echo "  Next steps:"
+if [[ "$PLATFORM" == "macos" ]]; then
+    echo "    1. Install Element X from the Mac App Store (id 1631335820)"
+    echo "    2. Open a new terminal — or run: exec zsh"
+    echo "    3. In tmux: Ctrl+a I (install plugins), Ctrl+a r (reload), Ctrl+a ? (cheat sheet)"
+    echo "    4. Bitwarden Desktop: Settings → Security → SSH Agent + 'Never lock' (headless) or Touch ID (laptop)"
+else
+    echo "    1. Open a new terminal — or run: exec zsh"
+    echo "    2. In tmux: Ctrl+a I (install plugins), Ctrl+a r (reload), Ctrl+a ? (cheat sheet)"
+fi
+echo ""
 
 # ── Restart banner ─────────────────────────────────
 echo -e "${YELLOW}╔════════════════════════════════════════════════════════╗${NC}"
