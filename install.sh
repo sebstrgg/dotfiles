@@ -677,6 +677,7 @@ setup_atuin() {
             _k=$(rbw get --field notes atuin 2>/dev/null || true)
             [[ -z "$_k" ]] && _k=$(rbw get atuin-key 2>/dev/null || true)
         fi
+        return 0
     }
     echo "  [1] Register new account  [2] Log in (needs key)  [3] Skip"
     read -rp "  Auth choice [1/2/3]: " _atuin_auth_choice
