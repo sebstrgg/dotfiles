@@ -494,6 +494,11 @@ echo "      4. System Settings → Login Items → ensure Bitwarden starts at lo
 echo "      5. Restart terminal — SSH_AUTH_SOCK now points at Bitwarden agent"
 echo ""
 echo "    Full setup + key migration runbook: docs/bitwarden-rbw-setup.md"
+echo ""
+echo "    Bitwarden CLI (bw) for scripted secret access:"
+echo "      bw login                # one-time login"
+echo "      export BW_SESSION=\$(bw unlock --raw)   # per-session unlock"
+echo "      bw get password atuin   # retrieve secrets"
 else
 echo "    Linux / WSL uses rbw with built-in SSH agent:"
 echo "      rbw config set email <your-vaultwarden-email>"
@@ -618,6 +623,91 @@ setup_rbw() {
     fi
 }
 
+# ── Step 9a-mac: bw (official Bitwarden CLI) configuration ─────
+# Interactive bw setup — macOS counterpart to setup_rbw. Logs in + captures
+# BW_SESSION for later use by setup_atuin. Idempotent via FORCE_SETUP override.
+setup_bw() {
+    [[ "$PLATFORM" == "macos" ]] || return 0
+    command -v bw >/dev/null 2>&1 || return 0
+    command -v jq >/dev/null 2>&1 || { warn "jq missing — bw setup skipped"; return 0; }
+
+    local bw_status
+    bw_status=$(bw status 2>/dev/null | jq -r '.status' 2>/dev/null || echo "unknown")
+
+    if [[ "$bw_status" == "unlocked" && -n "${BW_SESSION:-}" && -z "${FORCE_SETUP:-}" ]]; then
+        ok "bw already unlocked"
+        return 0
+    fi
+
+    echo ""
+    echo "────────────────────────────────────────────────────────────"
+    echo "Bitwarden (bw CLI) — configure now?"
+    echo "  Needed for: secret fetching + Atuin credentials sync."
+    echo "  (SSH keys on macOS are handled by the Desktop app, not bw.)"
+    echo "  Skip with N to configure later via 'bw login && bw unlock'."
+    echo "────────────────────────────────────────────────────────────"
+    read -rp "Configure bw now? [Y/n] " _yn
+    [[ "$_yn" =~ ^[Nn]$ ]] && { warn "Skipped bw setup."; return 0; }
+
+    # Cached answers from prior runs (shared with setup_rbw)
+    local env_file="$HOME/.config/dotfiles/local.env"
+    local vw_url="" vw_email=""
+    if [[ -f "$env_file" ]]; then
+        # shellcheck disable=SC1090
+        source "$env_file"
+        vw_url="${VAULTWARDEN_URL:-}"
+        vw_email="${VAULTWARDEN_EMAIL:-}"
+    fi
+
+    if [[ -z "$vw_url" ]]; then
+        echo "  [1] Self-hosted Vaultwarden (enter URL)"
+        echo "  [2] Bitwarden Cloud (https://vault.bitwarden.com)"
+        read -rp "Choice [1/2]: " _choice
+        case "$_choice" in
+            1) read -rp "  Vaultwarden server URL: " vw_url ;;
+            2) vw_url="https://vault.bitwarden.com" ;;
+            *) warn "Invalid choice — skipping bw setup"; return 0 ;;
+        esac
+    else
+        ok "Using cached Vaultwarden URL: $vw_url"
+    fi
+    [[ -z "$vw_email" ]] && read -rp "  Email: " vw_email
+
+    # bw config is persistent; overwrite is no-op if identical
+    bw config server "$vw_url" >/dev/null
+    ok "bw server configured: $vw_url"
+
+    mkdir -p "$(dirname "$env_file")"
+    {
+        grep -v '^VAULTWARDEN_' "$env_file" 2>/dev/null || true
+        echo "VAULTWARDEN_URL=$vw_url"
+        echo "VAULTWARDEN_EMAIL=$vw_email"
+    } > "$env_file.tmp" && mv "$env_file.tmp" "$env_file"
+
+    # Re-probe status after config (URL change may affect auth state)
+    bw_status=$(bw status 2>/dev/null | jq -r '.status' 2>/dev/null || echo "unknown")
+
+    if [[ "$bw_status" == "unauthenticated" ]]; then
+        info "Logging in as $vw_email — enter master password when prompted..."
+        if ! bw login "$vw_email"; then
+            warn "bw login failed — retry later with: bw login"
+            return 0
+        fi
+        bw_status="locked"
+    fi
+
+    # Unlock and capture session
+    info "Unlocking bw vault — enter master password..."
+    local _session
+    if ! _session=$(bw unlock --raw 2>/dev/null); then
+        warn "bw unlock failed — retry manually: export BW_SESSION=\$(bw unlock --raw)"
+        return 0
+    fi
+    export BW_SESSION="$_session"
+    bw sync >/dev/null 2>&1 || true
+    ok "bw unlocked; BW_SESSION exported for this script run"
+}
+
 # ── Step 9b: Interactive Atuin setup ─────────────────
 # Runs once. Skips if already logged in.
 setup_atuin() {
@@ -695,7 +785,24 @@ setup_atuin() {
 
             local _p=""
             local _store_in_vault=0
-            if command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
+            if [[ "$PLATFORM" == "macos" ]] && command -v bw >/dev/null 2>&1 && [[ -n "${BW_SESSION:-}" ]]; then
+                info "Auto-generating Atuin password via bw..."
+                _p=$(bw generate --length 40 --uppercase --lowercase --number --special 2>/dev/null || true)
+                if [[ -n "$_p" ]]; then
+                    _store_in_vault=1
+                    local _item_json
+                    _item_json=$(bw get template item | jq \
+                        --arg n "atuin" --arg u "$_u" --arg p "$_p" \
+                        '.name=$n | .type=1 | .login.username=$u | .login.password=$p | .login.uris=[]')
+                    if echo "$_item_json" | bw encode | bw create item >/dev/null 2>&1; then
+                        bw sync >/dev/null 2>&1 || true
+                        ok "Password generated and saved to vault as 'atuin'"
+                    else
+                        warn "bw create item failed — password generated but not stored"
+                        _store_in_vault=0
+                    fi
+                fi
+            elif command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
                 info "Auto-generating Atuin password via rbw..."
                 # rbw generate <LEN> <NAME> <USER> — generates password, saves to vault, prints to stdout
                 _p=$(rbw generate 40 atuin "$_u" 2>/dev/null || true)
@@ -705,7 +812,7 @@ setup_atuin() {
                 fi
             fi
             if [[ -z "$_p" ]]; then
-                warn "rbw unavailable — enter password manually"
+                warn "Auto-generation unavailable — enter password manually"
                 read -rsp "  Password: " _p; echo
             fi
 
@@ -717,28 +824,46 @@ setup_atuin() {
             _key=$(atuin key)
 
             if (( _store_in_vault )); then
-                info "Storing encryption key in Vaultwarden as 'atuin-key' (Login item, key as password)..."
-                # rbw add opens $EDITOR with a temp file; first line becomes the password.
-                # Override EDITOR with a script that writes the key + exits. rbw then stores it.
-                local _rbw_editor
-                _rbw_editor=$(mktemp)
-                cat > "$_rbw_editor" <<'EOSCRIPT'
+                if [[ "$PLATFORM" == "macos" ]] && command -v bw >/dev/null 2>&1 && [[ -n "${BW_SESSION:-}" ]]; then
+                    info "Storing encryption key in Vaultwarden as 'atuin-key' (Login item, key as password)..."
+                    local _key_json
+                    _key_json=$(bw get template item | jq \
+                        --arg n "atuin-key" --arg p "$_key" \
+                        '.name=$n | .type=1 | .login.password=$p | .login.uris=[]')
+                    if echo "$_key_json" | bw encode | bw create item >/dev/null 2>&1; then
+                        bw sync >/dev/null 2>&1 || true
+                        ok "Encryption key stored in vault as 'atuin-key'"
+                    else
+                        warn "Couldn't auto-store atuin-key — save manually:"
+                        echo ""
+                        echo "$_key"
+                        echo ""
+                        read -rp "Press enter when saved in Bitwarden..." _
+                    fi
+                else
+                    info "Storing encryption key in Vaultwarden as 'atuin-key' (Login item, key as password)..."
+                    # rbw add opens $EDITOR with a temp file; first line becomes the password.
+                    # Override EDITOR with a script that writes the key + exits. rbw then stores it.
+                    local _rbw_editor
+                    _rbw_editor=$(mktemp)
+                    cat > "$_rbw_editor" <<'EOSCRIPT'
 #!/bin/sh
 # rbw passes the temp file path as $1; overwrite with first-line-password.
 printf '%s\n' "$RBW_AUTO_VALUE" > "$1"
 EOSCRIPT
-                chmod +x "$_rbw_editor"
-                if RBW_AUTO_VALUE="$_key" EDITOR="$_rbw_editor" rbw add atuin-key 2>/dev/null; then
-                    rbw sync 2>/dev/null || true
-                    ok "Encryption key stored in vault as 'atuin-key'"
-                else
-                    warn "Couldn't auto-store atuin-key — save manually:"
-                    echo ""
-                    echo "$_key"
-                    echo ""
-                    read -rp "Press enter when saved in Vaultwarden as Secure Note 'atuin-key'..." _
+                    chmod +x "$_rbw_editor"
+                    if RBW_AUTO_VALUE="$_key" EDITOR="$_rbw_editor" rbw add atuin-key 2>/dev/null; then
+                        rbw sync 2>/dev/null || true
+                        ok "Encryption key stored in vault as 'atuin-key'"
+                    else
+                        warn "Couldn't auto-store atuin-key — save manually:"
+                        echo ""
+                        echo "$_key"
+                        echo ""
+                        read -rp "Press enter when saved in Vaultwarden as Secure Note 'atuin-key'..." _
+                    fi
+                    rm -f "$_rbw_editor"
                 fi
-                rm -f "$_rbw_editor"
             else
                 warn "SAVE THIS ATUIN ENCRYPTION KEY — your ONLY chance to see it:"
                 echo ""
@@ -752,20 +877,26 @@ EOSCRIPT
             ;;
         2)
             local _u="" _p="" _k=""
-            if command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
-                info "Pulling Atuin credentials from Vaultwarden..."
+            if [[ "$PLATFORM" == "macos" ]] && command -v bw >/dev/null 2>&1 && [[ -n "${BW_SESSION:-}" ]]; then
+                info "Pulling Atuin credentials from Bitwarden..."
+                bw sync >/dev/null 2>&1 || true
+                _u=$(bw get username atuin 2>/dev/null || true)
+                _p=$(bw get password atuin 2>/dev/null || true)
+                _k=$(bw get password atuin-key 2>/dev/null || true)
+            elif command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
+                info "Pulling Atuin credentials from Vaultwarden via rbw..."
                 _u=$(rbw get --field username atuin 2>/dev/null || true)
                 _p=$(rbw get atuin 2>/dev/null || true)
                 _k=$(rbw get atuin-key 2>/dev/null || true)
             fi
 
             if [[ -z "$_u" || -z "$_p" || -z "$_k" ]]; then
-                warn "rbw unavailable or items missing — enter manually"
+                warn "Auto-pull unavailable or items missing — enter manually"
                 read -rp "  Username: " _u
                 read -rsp "  Password: " _p; echo
                 read -rsp "  Encryption key: " _k; echo
             else
-                ok "Retrieved Atuin credentials from vault ($_u)"
+                ok "Retrieved atuin credentials from vault ($_u)"
             fi
 
             atuin login -u "$_u" -p "$_p" -k "$_k"
@@ -776,7 +907,8 @@ EOSCRIPT
     esac
 }
 
-setup_rbw
+setup_rbw       # no-op on Mac (PLATFORM check + no rbw binary)
+setup_bw        # no-op on Linux (PLATFORM check)
 setup_atuin
 
 echo ""
