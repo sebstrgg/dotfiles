@@ -23,14 +23,8 @@
 #   Subagents always show their own name regardless of this config.
 #
 # EFFORT LEVEL DISPLAY:
-#   The thinking effort level (low/medium/high/max) is not yet in the statusline
-#   JSON from Anthropic (tracked: github.com/anthropics/claude-code/issues/31415).
-#   Workaround: reads effortLevel from settings.json with this priority chain:
-#     1. CLAUDE_CODE_EFFORT_LEVEL env var (if set at launch)
-#     2. Project .claude/settings.json (effortLevel field)
-#     3. User ~/.claude/settings.json (effortLevel field)
-#     4. Default: "medium"
-#   When Anthropic adds the field to stdin JSON, switch to reading it directly.
+#   Read directly from stdin JSON `.effort.level` (Claude Code >= 2.1.x).
+#   Falls back to settings.json effortLevel, then "medium", for older clients.
 
 set -f  # disable globbing
 
@@ -60,6 +54,16 @@ SEVEN_DAY_PCT=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage //
 FIVE_HOUR_RESETS_AT=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty' 2>/dev/null)
 SESSION_ID=$(echo "$input" | jq -r '.session_id // ""' 2>/dev/null)
 
+# Newer stdin fields (Claude Code >= 2.1.x)
+EFFORT_JSON=$(echo "$input" | jq -r '.effort.level // empty' 2>/dev/null)
+THINKING_ON=$(echo "$input" | jq -r '.thinking.enabled // false' 2>/dev/null)
+OUTPUT_STYLE=$(echo "$input" | jq -r '.output_style.name // empty' 2>/dev/null)
+WORKTREE=$(echo "$input" | jq -r '.workspace.git_worktree // .worktree.name // empty' 2>/dev/null)
+IN_TOKENS=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0' 2>/dev/null | cut -d. -f1)
+OUT_TOKENS=$(echo "$input" | jq -r '.context_window.total_output_tokens // 0' 2>/dev/null | cut -d. -f1)
+PR_NUM_JSON=$(echo "$input" | jq -r '.pr.number // empty' 2>/dev/null)
+PR_STATE_JSON=$(echo "$input" | jq -r '.pr.review_state // empty' 2>/dev/null)
+
 # Background agents count — check multiple paths
 BG_COUNT=$(echo "$input" | jq -r '
     [(.background_agents // [])[], (.agents // [])[]]
@@ -76,6 +80,45 @@ RED='\033[31m'
 DIM='\033[2m'
 BOLD='\033[1m'
 RESET='\033[0m'
+
+# Effort-level palette — mirrors the /effort picker in Claude Code.
+# 24-bit truecolor for clean hues (16-color ANSI renders as muddy olive/lime).
+# CC animates xhigh (shimmer) and max (pulse); a statusline only redraws on
+# events, so those are rendered as static approximations.
+EFF_LOW='\033[38;2;255;221;0m'      # low    — clear yellow
+EFF_MED="$GREEN"                     # medium — same green as ctx/usage bars
+EFF_HIGH='\033[38;2;137;180;250m'   # high   — light blue
+EFF_XHIGH='\033[38;2;203;166;247m'  # xhigh  — light purple (no animation)
+EFF_ULTRA='\033[48;2;124;58;237m\033[38;2;255;255;255m'  # ultracode — purple bg, white text
+
+# Render "max" as static rainbow letters (pulse not possible in a statusline).
+# Sample the spectrum evenly across the word so even 3 letters span the full
+# range (red → green → purple) rather than clustering at the warm end.
+rainbow() {
+    local s="$1" out="" i ch idx len
+    local cols=("255;85;85" "255;184;108" "241;250;140" "80;250;123" "139;233;253" "189;147;249")
+    len=${#s}
+    for ((i=0; i<len; i++)); do
+        ch="${s:$i:1}"
+        if [ "$len" -le 1 ]; then idx=0; else idx=$(( i * (${#cols[@]} - 1) / (len - 1) )); fi
+        out="${out}\033[1;38;2;${cols[$idx]}m${ch}"
+    done
+    printf '%s' "${out}${RESET}"
+}
+
+# Return the colored effort label for a given level.
+effort_render() {
+    local e="$1"
+    case "$e" in
+        low)       printf '%s' "${EFF_LOW}${e}${RESET}" ;;
+        medium)    printf '%s' "${EFF_MED}${e}${RESET}" ;;
+        high)      printf '%s' "${EFF_HIGH}${e}${RESET}" ;;
+        xhigh)     printf '%s' "${EFF_XHIGH}${e}${RESET}" ;;
+        max)       rainbow "$e" ;;
+        ultracode) printf '%s' "${EFF_ULTRA} ${e} ${RESET}" ;;
+        *)         printf '%s' "${DIM}${e}${RESET}" ;;
+    esac
+}
 
 # ---------- Helper: color by threshold ----------
 color_for() {
@@ -112,9 +155,12 @@ short_model() {
         *Haiku*)  tier="Haiku" ;;
         *)        echo "$raw"; return ;;
     esac
-    # Extract version number (e.g. "4.6" from "claude-opus-4-6-..." or "4.5" from display names)
-    local ver
-    ver=$(echo "$raw" | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    # Extract version. display_name is now just the tier ("Opus"); the version
+    # lives in model.id like "claude-opus-4-8" → "4.8". Fall back to any x.y in raw.
+    local ver model_id
+    model_id=$(echo "$input" | jq -r '.model.id // empty' 2>/dev/null)
+    ver=$(echo "$model_id" | grep -oE '[0-9]+-[0-9]+' | head -1 | tr '-' '.')
+    [ -z "$ver" ] && ver=$(echo "$raw" | grep -oE '[0-9]+\.[0-9]+' | head -1)
     # Extract context window from the JSON input (in tokens → convert to K/M label)
     local ctx_tokens ctx_label
     ctx_tokens=$(echo "$input" | jq -r '.context_window.context_window_size // 0' 2>/dev/null | cut -d. -f1)
@@ -140,10 +186,10 @@ if run_with_timeout 2 git rev-parse --show-toplevel > /dev/null 2>&1; then
     GIT_ROOT=$(run_with_timeout 2 git rev-parse --show-toplevel 2>/dev/null)
 fi
 
-# ---------- Effort level (workaround until Anthropic adds to statusline JSON) ----------
-# Priority: env var > project .claude/settings.json > user ~/.claude/settings.json > "medium"
-# Tracks: github.com/anthropics/claude-code/issues/31415
-EFFORT="${CLAUDE_CODE_EFFORT_LEVEL:-}"
+# ---------- Effort level ----------
+# Priority: stdin JSON .effort.level > env var > project settings > user settings > "medium"
+EFFORT="${EFFORT_JSON:-}"
+[ -z "$EFFORT" ] && EFFORT="${CLAUDE_CODE_EFFORT_LEVEL:-}"
 if [ -z "$EFFORT" ] && [ -n "$GIT_ROOT" ]; then
     EFFORT=$(jq -r '.effortLevel // empty' "${GIT_ROOT}/.claude/settings.json" 2>/dev/null)
 fi
@@ -171,16 +217,17 @@ STATE_FILE="/tmp/claude-usage-state.json"
 USAGE_PCT="$FIVE_HOUR_PCT"
 RESET_TIME=""
 
-# Priority 1: Use resets_at from stdin JSON (authoritative from Claude Code)
+# Priority 1: Use resets_at from stdin JSON (authoritative from Claude Code).
+# Modern Claude Code sends a Unix epoch timestamp; older builds sent an ISO string.
 if [ -n "$FIVE_HOUR_RESETS_AT" ]; then
-    RESET_TIME=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$(echo "$FIVE_HOUR_RESETS_AT" | sed 's/Z$//; s/+.*//')" +%H:%M 2>/dev/null)
-    # If date -j fails (non-macOS), try GNU date
-    if [ -z "$RESET_TIME" ]; then
-        RESET_TIME=$(date -d "$FIVE_HOUR_RESETS_AT" +%H:%M 2>/dev/null)
-    fi
-    # Last resort: just extract HH:MM from the ISO string directly
-    if [ -z "$RESET_TIME" ]; then
-        RESET_TIME=$(echo "$FIVE_HOUR_RESETS_AT" | grep -oE '[0-9]{2}:[0-9]{2}' | head -1)
+    if echo "$FIVE_HOUR_RESETS_AT" | grep -qE '^[0-9]+$'; then
+        # Unix epoch seconds → HH:MM (BSD date -r, then GNU date -d @)
+        RESET_TIME=$(date -r "$FIVE_HOUR_RESETS_AT" +%H:%M 2>/dev/null || date -d "@$FIVE_HOUR_RESETS_AT" +%H:%M 2>/dev/null)
+    else
+        # Legacy ISO string fallback
+        RESET_TIME=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$(echo "$FIVE_HOUR_RESETS_AT" | sed 's/Z$//; s/+.*//')" +%H:%M 2>/dev/null)
+        [ -z "$RESET_TIME" ] && RESET_TIME=$(date -d "$FIVE_HOUR_RESETS_AT" +%H:%M 2>/dev/null)
+        [ -z "$RESET_TIME" ] && RESET_TIME=$(echo "$FIVE_HOUR_RESETS_AT" | grep -oE '[0-9]{2}:[0-9]{2}' | head -1)
     fi
 fi
 
@@ -255,24 +302,21 @@ format_duration() {
 
 DURATION=$(format_duration "$DURATION_MS")
 
-# ---------- Token estimation ----------
-estimate_tokens() {
-    local cost="$1" model="$2"
-    # Approximate cost per 1M tokens (blended input/output)
-    local rate
-    case "$model" in
-        *Opus*)   rate=45 ;;
-        *Sonnet*) rate=9 ;;
-        *Haiku*)  rate=2.4 ;;
-        *)        rate=15 ;;
-    esac
-    # tokens = (cost / rate) * 1,000,000 → display as K
-    local tokens_k
-    tokens_k=$(echo "$cost $rate" | awk '{if ($2 > 0) printf "%.0f", ($1 / $2) * 1000; else print "0"}')
-    echo "${tokens_k}K"
+# ---------- Token count (real, from stdin) ----------
+# context_window now reports actual token counts; no cost-based estimate needed.
+fmt_tokens() {
+    local n="${1:-0}"
+    if [ "$n" -ge 1000000 ] 2>/dev/null; then
+        awk "BEGIN{printf \"%.1fM\", $n/1000000}"
+    elif [ "$n" -ge 1000 ] 2>/dev/null; then
+        echo "$(( n / 1000 ))K"
+    else
+        echo "${n}"
+    fi
 }
 
-TOKENS=$(estimate_tokens "$COST" "$MODEL")
+TOTAL_TOKENS=$(( ${IN_TOKENS:-0} + ${OUT_TOKENS:-0} ))
+TOKENS=$(fmt_tokens "$TOTAL_TOKENS")
 
 # ---------- Last commit (timeout-wrapped) ----------
 COMMIT_INFO=""
@@ -282,9 +326,13 @@ if run_with_timeout 2 git rev-parse --git-dir > /dev/null 2>&1; then
     [ -n "$COMMIT_HASH" ] && COMMIT_INFO="commit ${COMMIT_HASH} (${COMMIT_AGO})"
 fi
 
-# ---------- Current PR (timeout-wrapped) ----------
+# ---------- Current PR ----------
+# Prefer stdin JSON (.pr) — instant, no subprocess. Fall back to gh for old clients.
 PR_INFO=""
-if [ -n "$GIT_ROOT" ] && command -v gh >/dev/null 2>&1; then
+if [ -n "$PR_NUM_JSON" ]; then
+    PR_INFO="PR #${PR_NUM_JSON}"
+    [ -n "$PR_STATE_JSON" ] && [ "$PR_STATE_JSON" != "null" ] && PR_INFO="${PR_INFO} (${PR_STATE_JSON})"
+elif [ -n "$GIT_ROOT" ] && command -v gh >/dev/null 2>&1; then
     PR_NUM=$(run_with_timeout 3 gh pr view --json number --jq '.number' 2>/dev/null)
     [ -n "$PR_NUM" ] && PR_INFO="PR #${PR_NUM}"
 fi
@@ -316,13 +364,21 @@ SEP="${DIM}│${RESET}"
 
 # Tokens in ctx section (parenthesized)
 CTX_TOKENS=""
-[ -n "$TOKENS" ] && [ "$TOKENS" != "0K" ] && CTX_TOKENS=" (${TOKENS})"
+[ -n "$TOKENS" ] && [ "$TOKENS" != "0" ] && CTX_TOKENS=" (${TOKENS})"
 
 # Reset section: labeled instead of icon
 RESET_SECTION=""
 [ -n "$RESET_TIME" ] && RESET_SECTION=" ${SEP} ${DIM}reset ${RESET_TIME}${RESET}"
 
-LINE1="${BOLD}${MODEL_SHORT}${RESET} ${DIM}${EFFORT}${RESET} ${SEP} ${CYAN}${PROJECT}/${AGENT}${RESET} ${SEP} ${CTX_COLOR}ctx ${CTX_BAR} ${CTX_PCT}%${CTX_TOKENS}${RESET} ${SEP} ${USAGE_COLOR}usage ${USAGE_BAR} ${USAGE_PCT}%${RESET}${RESET_SECTION}"
+# Session duration section
+DUR_SECTION=""
+[ -n "$DURATION" ] && DUR_SECTION=" ${SEP} ${DIM}⏱ ${DURATION}${RESET}"
+
+# Effort segment (colored per /effort palette), with a ✱ marker when thinking is on
+EFFORT_SEG="$(effort_render "$EFFORT")"
+[ "$THINKING_ON" = "true" ] && EFFORT_SEG="${EFFORT_SEG} ${YELLOW}✱${RESET}"
+
+LINE1="${BOLD}${MODEL_SHORT}${RESET} ${EFFORT_SEG} ${SEP} ${CYAN}${PROJECT}/${AGENT}${RESET} ${SEP} ${CTX_COLOR}ctx ${CTX_BAR} ${CTX_PCT}%${CTX_TOKENS}${RESET} ${SEP} ${USAGE_COLOR}usage ${USAGE_BAR} ${USAGE_PCT}%${RESET}${RESET_SECTION}${DUR_SECTION}"
 
 # ---------- Git branch + changes ----------
 GIT_CHANGES_INFO=""
@@ -344,8 +400,10 @@ fi
 PARTS=()
 [ -n "$GIT_CHANGES_INFO" ] && PARTS+=("${GIT_CHANGES_INFO}")
 [ -n "$GIT_BRANCH" ] && PARTS+=("${CYAN}${GIT_BRANCH}${RESET}")
+[ -n "$WORKTREE" ] && PARTS+=("${YELLOW}⑂ ${WORKTREE}${RESET}")
 [ -n "$PR_INFO" ] && PARTS+=("${GREEN}${PR_INFO}${RESET}")
 [ -n "$COMMIT_INFO" ] && PARTS+=("${COMMIT_INFO}")
+[ -n "$OUTPUT_STYLE" ] && [ "$OUTPUT_STYLE" != "default" ] && PARTS+=("${DIM}style:${OUTPUT_STYLE}${RESET}")
 [ "$BG_COUNT" -gt 0 ] 2>/dev/null && PARTS+=("▸▸ ${BG_COUNT} agents")
 
 # Join with " · "
