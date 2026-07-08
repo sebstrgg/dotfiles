@@ -78,11 +78,14 @@ These commands now work differently (better):
 | `git diff` | Side-by-side diff with Catppuccin colors (delta) |
 | `git log -p` | Syntax-highlighted patches (delta) |
 | `cd projects` | Jumps to your most-visited matching directory (zoxide) |
-| `Ctrl+R` | Fuzzy search through shell history (fzf) |
+| `Ctrl+R` | Fuzzy search through shell history, synced across machines (atuin) |
 | `Ctrl+T` | Fuzzy search for files (fzf) |
 | `glow README.md` | Rendered markdown in the terminal |
 | `nano file.py` | Syntax-highlighted editing |
 | `catp file.py` | Like cat but with scrollable pager |
+| `gs`, `gl`, `gd` | `git status`, `git log`, `git diff` shorthand |
+| `..`, `...`, `....` | Move up 1/2/3 directory levels |
+| `ta`, `tn`, `tls`, `tk` | tmux attach / new / list / kill-session |
 
 ## Directory Structure
 
@@ -94,6 +97,7 @@ dotfiles/
 │   └── cheatsheet.sh           Ctrl+a ? cheat sheet popup
 ├── starship/starship.toml      Starship prompt config
 ├── zsh/.zshrc                  Shell config (aliases, plugins, tool init)
+├── zsh/.zshrc.local.example    Template for machine-local overrides (gitignored)
 ├── git/
 │   ├── .gitconfig              Git config (delta, identity)
 │   └── catppuccin.gitconfig    Catppuccin Mocha theme for delta
@@ -103,19 +107,40 @@ dotfiles/
 ├── nano/.nanorc                nano config
 ├── vim/.vimrc                  vim config
 ├── zsh-syntax-highlighting/    Catppuccin theme for zsh highlighting
+├── scripts/doctor.sh           Drift detection & repair tool (run: dots-doctor)
 ├── Brewfile                    All Homebrew dependencies
 └── install.sh                  Bootstrap script
 ```
 
+## Repair & Drift Check
+
+Configs are symlinked from this repo into your home directory. Apps that rewrite
+their own config atomically (Claude Code's `settings.json`) are **seeded**
+(copied) instead, since they'd break a symlink. Two commands keep things healthy:
+
+```bash
+dots-doctor          # check symlinks, PATH, portability — exits non-zero on drift
+dots-doctor --fix    # back up + re-link drifted configs, seed missing ones
+```
+
+Aliases `dots`, `dots-doctor`, and `dots-update` are defined in `.zshrc`.
+
+### `~/.zshrc.local` — machine-local overrides
+
+Installer-managed blocks (bun, shell completions, the `claude-auto-retry`
+wrapper, etc.) live in `~/.zshrc.local`, **not** the tracked `.zshrc`. This
+keeps installers that append to your rc from corrupting the committed file.
+The first install seeds it from `zsh/.zshrc.local.example`; edit it freely.
+
 ## Updating
 
 ```bash
-cd ~/dotfiles
-git pull
-./install.sh
+dots-update          # git pull ~/dotfiles (alias defined in .zshrc)
+dots-doctor --fix    # re-link any changed configs, seed missing ones
 ```
 
-The install script is idempotent — safe to run any time.
+`./install.sh` is still the full re-run path (idempotent, safe any time), but
+after a routine `git pull` you usually only need `dots-doctor --fix`.
 
 ## Font
 
