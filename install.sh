@@ -40,6 +40,20 @@ copy_config() {
     ok "$(basename "$dst") → $dst (copied)"
 }
 
+# Seed a file only if the destination is absent — for app-owned configs (e.g.
+# Claude's settings.json) that the app rewrites atomically and would clobber a
+# symlink with. Never overwrites live state on re-runs.
+seed_config() {
+    local src="$1" dst="$2"
+    mkdir -p "$(dirname "$dst")"
+    if [[ ! -e "$dst" ]]; then
+        cp "$src" "$dst"
+        ok "$(basename "$dst") → $dst (seeded)"
+    else
+        ok "$(basename "$dst") present (untouched — app owns it)"
+    fi
+}
+
 # retry_menu <section-name> <cmd...> — loop cmd until it succeeds.
 # Returns 0 on success, 2 if user skips, exits cleanly on abort.
 retry_menu() {
@@ -369,6 +383,28 @@ section_header "$_cfg_step" "${SECTION_TITLES[$_cfg_step - 1]}" \
     "n/a — always runs (idempotent)."
 
 info "Symlinking configuration files..."
+
+# ── Lift installer-managed blocks out of an existing ~/.zshrc ──────────────
+# If ~/.zshrc already exists as a regular file with bun/entire/claude-auto-retry
+# blocks appended by installers, move them into ~/.zshrc.local so they can't
+# corrupt the tracked rc once we symlink over it.
+if [[ -f "$HOME/.zshrc" && ! -L "$HOME/.zshrc" && ! -f "$HOME/.zshrc.local" ]]; then
+    if grep -qE 'BUN_INSTALL|entire completion|claude-auto-retry' "$HOME/.zshrc"; then
+        info "Extracting installer-managed blocks from ~/.zshrc → ~/.zshrc.local"
+        awk '
+            /^# bun/ || /^export BUN_INSTALL/  { p=1 }
+            /^# Entire CLI/                    { p=1 }
+            /^# >>> claude-auto-retry/         { p=1 }
+            p { print }
+        ' "$HOME/.zshrc" > "$HOME/.zshrc.local"
+        ok "Seeded ~/.zshrc.local from existing rc"
+    fi
+fi
+# Always ensure ~/.zshrc.local exists (seed from the template if still absent).
+[[ -f "$HOME/.zshrc.local" ]] || cp "$SCRIPT_DIR/zsh/.zshrc.local.example" "$HOME/.zshrc.local"
+
+# Keep the repair tool executable (git usually preserves the bit, but be safe).
+[[ -f "$SCRIPT_DIR/scripts/doctor.sh" ]] && chmod +x "$SCRIPT_DIR/scripts/doctor.sh"
 link_config "$SCRIPT_DIR/tmux/tmux.conf"         "$HOME/.tmux.conf"
 link_config "$SCRIPT_DIR/starship/starship.toml"  "$HOME/.config/starship.toml"
 link_config "$SCRIPT_DIR/zsh/.zshrc"              "$HOME/.zshrc"
@@ -408,7 +444,10 @@ fi
 
 info "Setting up Claude Code configuration..."
 mkdir -p "$HOME/.claude/rules"
-link_config "$SCRIPT_DIR/claude/settings.json" "$HOME/.claude/settings.json"
+# settings.json is SEEDED, never symlinked: Claude Code rewrites it atomically
+# (write-to-temp + rename), which silently replaces a symlink with a regular
+# file — so linking it guarantees drift. Seed the baseline; let Claude own it.
+seed_config "$SCRIPT_DIR/claude/settings.json" "$HOME/.claude/settings.json"
 link_config "$SCRIPT_DIR/claude/statusline.sh" "$HOME/.claude/statusline.sh"
 chmod +x "$HOME/.claude/statusline.sh"
 for rule in "$SCRIPT_DIR"/claude/rules/*.md; do
@@ -898,6 +937,7 @@ if [[ "$PLATFORM" == "macos" ]]; then
 echo "  Terminal     Ghostty with Catppuccin Mocha"
 fi
 echo "  Re-run prompts: FORCE_SETUP=1 ./install.sh   Runbook: docs/bitwarden-rbw-setup.md"
+echo "  Repair/drift check anytime: dots-doctor  (or scripts/doctor.sh --fix)"
 echo ""
 if [[ "$PLATFORM" == "macos" ]] && [[ "$HEADLESS_MODE" == "1" ]]; then
 echo -e "  ${YELLOW}⚠${NC} Plug in an HDMI dummy plug (~\$5) for crisp 4K Screen Sharing."
