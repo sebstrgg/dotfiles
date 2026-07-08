@@ -75,15 +75,14 @@
     "sharp-edges@trailofbits": true,
     "agentic-actions-auditor@trailofbits": true,
     "modern-python@trailofbits": true,
-    "content-creator@claude-code-skills": true,
-    "demand-gen@claude-code-skills": true,
-    "self-improving-agent@claude-code-skills": true,
-    "executive-mentor@claude-code-skills": true,
-    "marketing-skills@claude-code-skills": true,
-    "business-growth-skills@claude-code-skills": true,
-    "c-level-skills@claude-code-skills": true,
-    "engineering-skills@claude-code-skills": true,
-    "pm-skills@claude-code-skills": true
+    "ask-questions-if-underspecified@trailofbits": true,
+    "audit-context-building@trailofbits": true,
+    "entry-point-analyzer@trailofbits": true,
+    "gh-cli@trailofbits": true,
+    "property-based-testing@trailofbits": true,
+    "semgrep-rule-variant-creator@trailofbits": true,
+    "skill-improver@trailofbits": true,
+    "workflow-skill-design@trailofbits": true
   },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
@@ -107,6 +106,7 @@
   },
   "effortLevel": "xhigh",
   "skipDangerousModePermissionPrompt": true,
+  "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
   "voiceEnabled": true
 }

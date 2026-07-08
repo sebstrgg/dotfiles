@@ -19,6 +19,9 @@ window-padding-y = 8
 # Don't prompt when closing (tmux handles session persistence)
 confirm-close-surface = false
 
+# Never restore old windows after quitting or crashing.
+window-save-state = never
+
 # ── Clipboard ──────────────────────────────────────────
 # Auto-copy selected text to both selection and system clipboards
 copy-on-select = clipboard
