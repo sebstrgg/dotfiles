@@ -1,0 +1,94 @@
+#!/usr/bin/expect -f
+# bw-ssh — run one read-only CLI command on a Bitwarden-password device.
+#   bw-ssh ruckus-unleashed 'show sysinfo'
+#   bw-ssh icx7150-c12p 'show version'
+# Vetted persistent helper referenced by personal-infra runbooks
+# (runbooks/access/bitwarden.md, hosts/ruckus-unleashed.md, hosts/icx7150-c12p.md).
+# Password is resolved from the Keychain-bridged Bitwarden session only inside
+# this PTY process and never echoed; output is suppressed until auth completes.
+# Patterns avoid (?i): expect's gate-keeper glob is case-sensitive and would
+# silently never match 'Password:'.
+log_user 0
+set timeout 25
+
+set target [lindex $argv 0]
+set cmd [lindex $argv 1]
+if {$target ni {ruckus-unleashed icx7150-c12p} || $cmd eq ""} {
+  puts "usage: bw-ssh <ruckus-unleashed|icx7150-c12p> '<single read-only command>'"
+  exit 64
+}
+
+if {[catch {exec /usr/bin/security find-generic-password -a $env(USER) -s personal-infra-bitwarden-session -w} session]} {
+  puts "KEYCHAIN-ITEM-ABSENT — run bw-bridge first"
+  exit 2
+}
+set env(BW_SESSION) $session
+if {[catch {exec -ignorestderr bw get password {Unleashed Login}} pw]} {
+  puts "BW-GET-FAILED (session stale/locked, or item missing?) — run bw-bridge"
+  exit 3
+}
+
+spawn ssh $target
+
+if {$target eq "ruckus-unleashed"} {
+  # Application-level login inside the SSH session, then privileged mode.
+  expect {
+    -re {yes/no} { puts "HOSTKEY-PROMPT — refusing to auto-accept"; exit 4 }
+    -re {ogin[: ]} { send "seb\r" }
+    timeout { puts "TIMEOUT before login prompt"; exit 5 }
+    eof { puts "CONNECTION-CLOSED before login prompt"; exit 5 }
+  }
+  expect {
+    -re {assword} { send "$pw\r" }
+    timeout { puts "TIMEOUT before password prompt"; exit 5 }
+    eof { puts "CONNECTION-CLOSED before password prompt"; exit 5 }
+  }
+  set pw ""
+  set env(BW_SESSION) ""
+  expect {
+    -re {ruckus>} {}
+    -re {ncorrect|enied|ailed|ogin[: ]} { puts "AUTH-FAILED"; exit 6 }
+    timeout { puts "TIMEOUT before CLI prompt"; exit 5 }
+    eof { puts "CONNECTION-CLOSED after auth attempt"; exit 5 }
+  }
+  send "enable\r"
+  expect {
+    -re {ruckus#} {}
+    -re {assword} { puts "ENABLE-REQUIRES-PASSWORD — stopping"; exit 7 }
+    timeout { puts "TIMEOUT entering privileged mode"; exit 5 }
+  }
+  log_user 1
+  send "$cmd\r"
+  expect -re {ruckus#}
+  log_user 0
+  send "exit\r"
+} else {
+  # ICX: SSH-level password auth; disable FastIron paging before the command.
+  expect {
+    -re {yes/no} { puts "HOSTKEY-PROMPT — refusing to auto-accept"; exit 4 }
+    -re {assword} { send "$pw\r" }
+    timeout { puts "TIMEOUT before password prompt"; exit 5 }
+    eof { puts "CONNECTION-CLOSED before password prompt"; exit 5 }
+  }
+  set pw ""
+  set env(BW_SESSION) ""
+  expect {
+    -re {@.*[>#]} {}
+    -re {assword} { puts "AUTH-FAILED (re-prompted)"; exit 6 }
+    timeout { puts "TIMEOUT before CLI prompt"; exit 5 }
+    eof { puts "CONNECTION-CLOSED after auth attempt"; exit 5 }
+  }
+  send "skip-page-display\r"
+  expect -re {@.*[>#]}
+  log_user 1
+  send "$cmd\r"
+  expect -re {@.*[>#]}
+  log_user 0
+  send "exit\r"
+}
+
+expect {
+  eof {}
+  timeout {}
+}
+puts "\nBW-SSH-OK"

@@ -293,6 +293,17 @@ elif [[ "$PLATFORM" == "linux" ]]; then
         ok "fd alias created (fdfind → fd)"
     fi
 
+    # Tracked helper scripts (bin/*) → ~/.local/bin
+    if [[ -d "$SCRIPT_DIR/bin" ]]; then
+        mkdir -p "$HOME/.local/bin"
+        for helper in "$SCRIPT_DIR"/bin/*; do
+            [[ -f "$helper" ]] || continue
+            chmod +x "$helper"
+            ln -sf "$helper" "$HOME/.local/bin/$(basename "$helper")"
+        done
+        ok "helper scripts linked into ~/.local/bin"
+    fi
+
     if [[ "$SHELL" != *"zsh"* ]]; then
         info "Setting zsh as default shell..."
         chsh -s "$(which zsh)"
