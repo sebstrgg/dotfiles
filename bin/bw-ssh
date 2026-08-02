@@ -1,6 +1,11 @@
 #!/usr/bin/expect -f
 # bw-ssh — authenticate to a Bitwarden-password device and hand over the session.
-#   bw-ssh ruckus-unleashed      bw-ssh icx7150-c12p
+#   bw-ssh unifi                 bw-ssh pikvm
+#   bw-ssh ruckus-unleashed
+#   bw-ssh icx7150-c12p          bw-ssh icx7150-c12p --factory-host 10.1.100.165
+# `unifi` reaches the UCG-Fiber UniFi OS shell (item "Unifi wl7r", user wl7r,
+# ssh alias `unifi`). Read-only by default; UniFi OS is managed through its
+# supported UI/API — never edit its filesystem or database (core.md section 4).
 # Auth only, by design: resolves the password from the Keychain-bridged
 # Bitwarden session inside this private PTY, completes the device login,
 # clears secrets, then connects the live session to the caller — a human
@@ -13,9 +18,22 @@ log_user 0
 set timeout 25
 
 set target [lindex $argv 0]
-if {$target ni {ruckus-unleashed icx7150-c12p}} {
-  puts "usage: bw-ssh <ruckus-unleashed|icx7150-c12p>"
+if {$target ni {unifi pikvm ruckus-unleashed icx7150-c12p}} {
+  puts "usage: bw-ssh <unifi|pikvm|ruckus-unleashed|icx7150-c12p> \[--factory-host <IPv4>\]"
   exit 64
+}
+
+set factory_host ""
+if {[llength $argv] > 1} {
+  if {$target ne "icx7150-c12p" || [llength $argv] != 3 || [lindex $argv 1] ne "--factory-host"} {
+    puts "usage: bw-ssh <unifi|pikvm|ruckus-unleashed|icx7150-c12p> \[--factory-host <IPv4>\]"
+    exit 64
+  }
+  set factory_host [lindex $argv 2]
+  if {![regexp {^[0-9]{1,3}(\.[0-9]{1,3}){3}$} $factory_host]} {
+    puts "INVALID-FACTORY-HOST"
+    exit 64
+  }
 }
 
 if {[catch {exec /usr/bin/security find-generic-password -a $env(USER) -s personal-infra-bitwarden-session -w} session]} {
@@ -23,14 +41,74 @@ if {[catch {exec /usr/bin/security find-generic-password -a $env(USER) -s person
   exit 2
 }
 set env(BW_SESSION) $session
-if {[catch {exec -ignorestderr bw get password {Unleashed Login}} pw]} {
+set bw_item "Unleashed Login"
+if {$target eq "unifi"} { set bw_item "Unifi wl7r" }
+if {$target eq "pikvm"} { set bw_item "pikvm - root" }
+if {[catch {exec -ignorestderr bw get password $bw_item} pw]} {
   puts "BW-GET-FAILED (session stale/locked, or item missing?) — run bw-bridge"
   exit 3
 }
 
-spawn ssh $target
+if {$target eq "pikvm"} {
+  # Canonical ed25519 key is pinned in known_hosts. Never enroll on first use.
+  # SSH_ASKPASS delivery + MOTD-safe patterns (2026-08-02): PiKVM's login
+  # banner contains the word "password" ("Changing the root password: passwd"),
+  # so any post-auth expect on {assword} false-positives on a SUCCESSFUL
+  # login — that was the original branch's defect, not the credential.
+  # Askpass sidesteps prompt-matching entirely; the password rides a 0600
+  # tempfile for the duration of the handshake only. The success pattern
+  # matches the colored prompt tail "]# " (ANSI codes sit between the
+  # bracket and the username, so {\[root@pikvm...} never matches).
+  set pwfile [exec mktemp]
+  exec chmod 600 $pwfile
+  set pf [open $pwfile w]
+  fconfigure $pf -translation binary
+  puts -nonewline $pf $pw
+  close $pf
+  set askfile [exec mktemp]
+  set af [open $askfile w]
+  puts $af "#!/bin/sh"
+  puts $af "cat $pwfile"
+  close $af
+  exec chmod 700 $askfile
+  set pw ""
+  set env(BW_SESSION) ""
+  set env(SSH_ASKPASS) $askfile
+  set env(SSH_ASKPASS_REQUIRE) force
+  set env(DISPLAY) :0
+  spawn ssh -o StrictHostKeyChecking=yes -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no root@pikvm.wl7r.com
+  expect {
+    -re {yes/no} { exec rm -f $pwfile $askfile; puts "HOSTKEY-PROMPT — refusing to auto-accept"; exit 4 }
+    -re {\]# ?$} {}
+    -re {ermission denied} { exec rm -f $pwfile $askfile; puts "AUTH-FAILED"; exit 6 }
+    timeout { exec rm -f $pwfile $askfile; puts "TIMEOUT before shell prompt"; exit 5 }
+    eof { exec rm -f $pwfile $askfile; puts "CONNECTION-CLOSED during auth"; exit 5 }
+  }
+  exec rm -f $pwfile $askfile
+} elseif {$factory_host ne ""} {
+  spawn ssh -o HostName=$factory_host -o User=super -o StrictHostKeyChecking=accept-new $target
+} else {
+  spawn ssh $target
+}
 
-if {$target eq "ruckus-unleashed"} {
+if {$target eq "unifi"} {
+  # UniFi OS: SSH-level password auth into a POSIX shell.
+  expect {
+    -re {yes/no} { puts "HOSTKEY-PROMPT — refusing to auto-accept"; exit 4 }
+    -re {assword} { send "$pw\r" }
+    timeout { puts "TIMEOUT before password prompt"; exit 5 }
+    eof { puts "CONNECTION-CLOSED before password prompt"; exit 5 }
+  }
+  set pw ""
+  set env(BW_SESSION) ""
+  expect {
+    -re {[\$#] $} {}
+    -re {assword} { puts "AUTH-FAILED (re-prompted)"; exit 6 }
+    -re {ermission denied} { puts "AUTH-FAILED"; exit 6 }
+    timeout { puts "TIMEOUT before shell prompt"; exit 5 }
+    eof { puts "CONNECTION-CLOSED after auth attempt"; exit 5 }
+  }
+} elseif {$target eq "ruckus-unleashed"} {
   # Application-level login inside the SSH session.
   expect {
     -re {yes/no} { puts "HOSTKEY-PROMPT — refusing to auto-accept"; exit 4 }
@@ -51,8 +129,8 @@ if {$target eq "ruckus-unleashed"} {
     timeout { puts "TIMEOUT before CLI prompt"; exit 5 }
     eof { puts "CONNECTION-CLOSED after auth attempt"; exit 5 }
   }
-} else {
-  # ICX: SSH-level password auth.
+} elseif {$target ne "pikvm"} {
+  # ICX: SSH-level password auth. (pikvm authenticated in its spawn block above.)
   expect {
     -re {yes/no} { puts "HOSTKEY-PROMPT — refusing to auto-accept"; exit 4 }
     -re {assword} { send "$pw\r" }
