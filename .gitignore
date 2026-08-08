@@ -15,3 +15,10 @@ docs/
 !docs/
 docs/*
 !docs/bitwarden-rbw-setup.md
+
+# operator scratch backups (bw-ssh.bak-pre-*, config.bak-pre-*, …)
+*.bak-pre-*
+*.bak-*
+
+# personal global instructions — deliberately NOT published
+claude/CLAUDE.md
