@@ -210,3 +210,7 @@ eval "$(starship init zsh)"
 # initialized after everything else so later `eval`/`source` lines can't
 # clobber the hook array. Moving anything below this re-triggers the warning.
 eval "$(zoxide init zsh --cmd cd)"  # smart cd that learns your directories
+
+
+# Added by Antigravity CLI installer
+export PATH="/Users/sebastian/.local/bin:$PATH"
