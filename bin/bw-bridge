@@ -4,7 +4,7 @@
 # Interactive by design: the master password goes only into bw's own prompt.
 # The session (revocable, not the master password) is passed to `security`
 # as an argument — brief ps exposure, within the same-user Keychain tradeoff
-# documented in ~/personal-infra/runbooks/access/bitwarden.md.
+# documented in ~/code/personal-infra/runbooks/access/bitwarden.md.
 set -euo pipefail
 
 status="$(bw status | jq -r .status)"
