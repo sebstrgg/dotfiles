@@ -22,3 +22,4 @@ docs/*
 
 # personal global instructions — deliberately NOT published
 claude/CLAUDE.md
+agents/global-instructions.md
