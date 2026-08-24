@@ -1,24 +1,32 @@
 #!/bin/bash
 # Bridge an unlocked Bitwarden session into the macOS Login Keychain so
-# Codex / Claude Code can use bw without seeing any credential.
+# Codex / Claude Code can use bw-vault without seeing any credential.
 # Interactive by design: the master password goes only into bw's own prompt.
 # The session (revocable, not the master password) is passed to `security`
 # as an argument — brief ps exposure, within the same-user Keychain tradeoff
 # documented in ~/code/personal-infra/runbooks/access/bitwarden.md.
 set -euo pipefail
 
-status="$(bw status | jq -r .status)"
-if [[ "$status" == "unauthenticated" ]]; then
-	bw login
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+BW_CLI="$SCRIPT_DIR/bw-vault"
+
+if [[ ! -x "$BW_CLI" ]]; then
+	echo "ERROR: compatible Bitwarden wrapper is missing: $BW_CLI" >&2
+	exit 1
 fi
 
-session="$(bw unlock --raw)"
+status="$("$BW_CLI" status | jq -r .status)"
+if [[ "$status" == "unauthenticated" ]]; then
+	"$BW_CLI" login
+fi
+
+session="$("$BW_CLI" unlock --raw)"
 /usr/bin/security add-generic-password \
 	-U -a "$USER" -s personal-infra-bitwarden-session -w "$session"
 unset session
 
 check="$(BW_SESSION="$(/usr/bin/security find-generic-password \
-	-a "$USER" -s personal-infra-bitwarden-session -w)" bw status | jq -r .status)"
+	-a "$USER" -s personal-infra-bitwarden-session -w)" "$BW_CLI" status | jq -r .status)"
 if [[ "$check" != "unlocked" ]]; then
 	echo "ERROR: cached session does not unlock the vault (status: $check)" >&2
 	exit 1

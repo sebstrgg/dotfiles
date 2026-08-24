@@ -1,0 +1,12 @@
+#!/bin/bash
+# Run Bitwarden CLI at the version compatible with WL7R's Vaultwarden API.
+#
+# Bitwarden CLI 2026.8.0 fails against Vaultwarden's 2026.6.0 API config when
+# `utcDate` is absent (`RangeError: Invalid time value`). Keep bridge and agent
+# operations on one reviewed version until the server/client pair is upgraded
+# and reverified together.
+set -euo pipefail
+
+readonly CLI_VERSION=2026.6.0
+
+exec npx --yes --package="@bitwarden/cli@${CLI_VERSION}" -- bw "$@"
