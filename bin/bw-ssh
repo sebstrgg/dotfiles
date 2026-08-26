@@ -1,39 +1,39 @@
 #!/usr/bin/expect -f
 # bw-ssh — authenticate to a Bitwarden-password device and hand over the session.
 #   bw-ssh unifi                 bw-ssh pikvm
-#   bw-ssh ruckus-unleashed
-#   bw-ssh icx7150-c12p          bw-ssh icx7150-c12p --factory-host 10.1.100.165
-# `unifi` reaches the UCG-Fiber UniFi OS shell (item "Unifi wl7r", user wl7r,
-# ssh alias `unifi`). Read-only by default; UniFi OS is managed through its
-# supported UI/API — never edit its filesystem or database (core.md section 4).
+# `unifi` reaches the UCG-Fiber UniFi OS shell (item "Unifi wl7r", ssh alias
+# `unifi`, SSH user root — `wl7r` is the UniFi UI admin name, not the shell
+# user). Read-only by default; UniFi OS is managed through its supported
+# UI/API — never edit its filesystem or database (core.md section 4).
 # Auth only, by design: resolves the password from the Keychain-bridged
 # Bitwarden session inside this private PTY, completes the device login,
 # clears secrets, then connects the live session to the caller — a human
 # terminal or an agent's own expect/script wrapper. The caller drives all
-# commands per the personal-infra device runbooks (Unleashed: `enable`
-# before show/config; ICX: `skip-page-display`; mutation boundaries apply).
+# commands per the personal-infra device runbooks (mutation boundaries apply).
+# Credentials resolve by Bitwarden item **id**, never by name: four vault
+# items now match the search string "Unifi wl7r", and the CLI refuses an
+# ambiguous name with "More than one result was found". Ids are unambiguous
+# and survive renames; the human-readable name stays as a comment only.
+# Lookups go through the pinned `bw-vault` wrapper (see
+# runbooks/access/bitwarden.md) rather than a Homebrew `bw` of unreviewed
+# version. Ruckus Unleashed and the ICX switch were factory-reset and
+# disconnected; their profiles and vault item are retired, not commented out.
 # Wrapper authors: avoid (?i)-prefixed expect patterns — the gate-keeper
 # glob is case-sensitive and silently never matches 'Password:'.
 log_user 0
 set timeout 25
 
-set target [lindex $argv 0]
-if {$target ni {unifi pikvm ruckus-unleashed icx7150-c12p}} {
-  puts "usage: bw-ssh <unifi|pikvm|ruckus-unleashed|icx7150-c12p> \[--factory-host <IPv4>\]"
-  exit 64
+# Bitwarden item ids. Names are documentation; the id is what is resolved.
+array set bw_item_id {
+  unifi 165435ea-6eb1-4f85-a913-efdaa04bebf9
+  pikvm 5759163b-bc59-4727-ba68-b555d8037125
 }
+# unifi -> "Unifi wl7r"        pikvm -> "pikvm - root"
 
-set factory_host ""
-if {[llength $argv] > 1} {
-  if {$target ne "icx7150-c12p" || [llength $argv] != 3 || [lindex $argv 1] ne "--factory-host"} {
-    puts "usage: bw-ssh <unifi|pikvm|ruckus-unleashed|icx7150-c12p> \[--factory-host <IPv4>\]"
-    exit 64
-  }
-  set factory_host [lindex $argv 2]
-  if {![regexp {^[0-9]{1,3}(\.[0-9]{1,3}){3}$} $factory_host]} {
-    puts "INVALID-FACTORY-HOST"
-    exit 64
-  }
+set target [lindex $argv 0]
+if {[llength $argv] != 1 || ![info exists bw_item_id($target)]} {
+  puts "usage: bw-ssh <unifi|pikvm>"
+  exit 64
 }
 
 if {[catch {exec /usr/bin/security find-generic-password -a $env(USER) -s personal-infra-bitwarden-session -w} session]} {
@@ -41,13 +41,13 @@ if {[catch {exec /usr/bin/security find-generic-password -a $env(USER) -s person
   exit 2
 }
 set env(BW_SESSION) $session
-set bw_item "Unleashed Login"
-if {$target eq "unifi"} { set bw_item "Unifi wl7r" }
-if {$target eq "pikvm"} { set bw_item "pikvm - root" }
-if {[catch {exec -ignorestderr bw get password $bw_item} pw]} {
-  puts "BW-GET-FAILED (session stale/locked, or item missing?) — run bw-bridge"
+set session ""
+set bw_vault [file join $env(HOME) .local bin bw-vault]
+if {[catch {exec -ignorestderr $bw_vault get password $bw_item_id($target)} pw]} {
+  puts "BW-GET-FAILED (session stale/locked, or item id changed) — run bw-bridge"
   exit 3
 }
+set env(BW_SESSION) ""
 
 if {$target eq "pikvm"} {
   # Canonical ed25519 key is pinned in known_hosts. Never enroll on first use.
@@ -72,7 +72,6 @@ if {$target eq "pikvm"} {
   close $af
   exec chmod 700 $askfile
   set pw ""
-  set env(BW_SESSION) ""
   set env(SSH_ASKPASS) $askfile
   set env(SSH_ASKPASS_REQUIRE) force
   set env(DISPLAY) :0
@@ -85,14 +84,11 @@ if {$target eq "pikvm"} {
     eof { exec rm -f $pwfile $askfile; puts "CONNECTION-CLOSED during auth"; exit 5 }
   }
   exec rm -f $pwfile $askfile
-} elseif {$factory_host ne ""} {
-  spawn ssh -o HostName=$factory_host -o User=super -o StrictHostKeyChecking=accept-new $target
 } else {
+  # UniFi OS: SSH-level password auth into a POSIX shell. The console offers
+  # keyboard-interactive, not `password`; let ssh negotiate rather than forcing
+  # a method (access.yaml, profile unifi-os-ssh).
   spawn ssh $target
-}
-
-if {$target eq "unifi"} {
-  # UniFi OS: SSH-level password auth into a POSIX shell.
   expect {
     -re {yes/no} { puts "HOSTKEY-PROMPT — refusing to auto-accept"; exit 4 }
     -re {assword} { send "$pw\r" }
@@ -100,49 +96,11 @@ if {$target eq "unifi"} {
     eof { puts "CONNECTION-CLOSED before password prompt"; exit 5 }
   }
   set pw ""
-  set env(BW_SESSION) ""
   expect {
     -re {[\$#] $} {}
     -re {assword} { puts "AUTH-FAILED (re-prompted)"; exit 6 }
     -re {ermission denied} { puts "AUTH-FAILED"; exit 6 }
     timeout { puts "TIMEOUT before shell prompt"; exit 5 }
-    eof { puts "CONNECTION-CLOSED after auth attempt"; exit 5 }
-  }
-} elseif {$target eq "ruckus-unleashed"} {
-  # Application-level login inside the SSH session.
-  expect {
-    -re {yes/no} { puts "HOSTKEY-PROMPT — refusing to auto-accept"; exit 4 }
-    -re {ogin[: ]} { send "seb\r" }
-    timeout { puts "TIMEOUT before login prompt"; exit 5 }
-    eof { puts "CONNECTION-CLOSED before login prompt"; exit 5 }
-  }
-  expect {
-    -re {assword} { send "$pw\r" }
-    timeout { puts "TIMEOUT before password prompt"; exit 5 }
-    eof { puts "CONNECTION-CLOSED before password prompt"; exit 5 }
-  }
-  set pw ""
-  set env(BW_SESSION) ""
-  expect {
-    -re {ruckus>} {}
-    -re {ncorrect|enied|ailed|ogin[: ]} { puts "AUTH-FAILED"; exit 6 }
-    timeout { puts "TIMEOUT before CLI prompt"; exit 5 }
-    eof { puts "CONNECTION-CLOSED after auth attempt"; exit 5 }
-  }
-} elseif {$target ne "pikvm"} {
-  # ICX: SSH-level password auth. (pikvm authenticated in its spawn block above.)
-  expect {
-    -re {yes/no} { puts "HOSTKEY-PROMPT — refusing to auto-accept"; exit 4 }
-    -re {assword} { send "$pw\r" }
-    timeout { puts "TIMEOUT before password prompt"; exit 5 }
-    eof { puts "CONNECTION-CLOSED before password prompt"; exit 5 }
-  }
-  set pw ""
-  set env(BW_SESSION) ""
-  expect {
-    -re {@[^\r\n]*[>#]} {}
-    -re {assword} { puts "AUTH-FAILED (re-prompted)"; exit 6 }
-    timeout { puts "TIMEOUT before CLI prompt"; exit 5 }
     eof { puts "CONNECTION-CLOSED after auth attempt"; exit 5 }
   }
 }
