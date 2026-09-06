@@ -132,7 +132,31 @@ wrapper, etc.) live in `~/.zshrc.local`, **not** the tracked `.zshrc`. This
 keeps installers that append to your rc from corrupting the committed file.
 The first install seeds it from `zsh/.zshrc.local.example`; edit it freely.
 
-## Agent navigation and validation
+## Global agent workflows, navigation, and validation
+
+These integrations are user-wide for Claude Code and Codex, across projects on
+the configured machine. Start a new agent session after installation. Each
+project keeps its own graph and planning artifacts; global installation does
+not create a graph for every project or configure other machines automatically.
+
+The shared [engineering workflow](agents/skills/engineering-workflow/SKILL.md)
+selects Matt Pocock playbooks from the work's current phase. Unresolved decisions
+trigger grilling; substantial agreed work gets a spec and, when needed, delivery
+tickets. Small, settled tasks stay direct. The orchestrator reads manual-only
+upstream playbooks as references under Sebastian's standing authorization, so
+their slash commands need no metadata patches or plugin-cache edits. External
+publication still follows the user's approval rules; reviewable drafts come
+first. Existing decisions satisfy matching workflow checkpoints.
+
+Matt's library is a separate global dependency, currently shared at
+`~/.agents/skills`, with runtime/plugin installations as a fallback. The dotfiles
+installer links the orchestrator and global pointers; it does not install or
+upgrade Matt's library. To disable orchestration, remove the
+`engineering-workflow` links from both runtimes, its Claude rule, and its Codex
+global instruction pointer. Keep private global instructions aligned: remove
+older clauses requiring explicit invocation of these workflows.
+`dots-doctor` checks the shared skill links and RTK configuration, and
+`dots-doctor --fix` repairs those links if they drift.
 
 `graphify-navigation` is a shared Claude/Codex skill for using existing graphs
 on architecture and dependency questions. It checks the indexed corpus first,

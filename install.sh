@@ -466,11 +466,16 @@ for rule in "$SCRIPT_DIR"/claude/rules/*.md; do
 done
 ok "Claude Code config linked"
 
-# Share the navigation skill and RTK policy across local coding agents.
+# Share workflow selection, navigation, and RTK policy across local coding agents.
 mkdir -p "$HOME/.claude/skills" "$HOME/.codex/skills"
+link_config "$SCRIPT_DIR/agents/skills/engineering-workflow" "$HOME/.claude/skills/engineering-workflow"
+link_config "$SCRIPT_DIR/agents/skills/engineering-workflow" "$HOME/.codex/skills/engineering-workflow"
 link_config "$SCRIPT_DIR/agents/skills/graphify-navigation" "$HOME/.claude/skills/graphify-navigation"
 link_config "$SCRIPT_DIR/agents/skills/graphify-navigation" "$HOME/.codex/skills/graphify-navigation"
 link_config "$SCRIPT_DIR/agents/RTK.md" "$HOME/.codex/RTK.md"
+if ! grep -q 'engineering-workflow/SKILL.md' "$HOME/.codex/AGENTS.md" 2>/dev/null; then
+    printf '\nFor planning, design decisions, specs, tickets, implementation, debugging, research, review, or handoffs, read ~/.codex/skills/engineering-workflow/SKILL.md at intake and phase changes. Select applicable Matt Pocock playbooks automatically; slash commands are optional. Small, settled work stays direct.\n' >> "$HOME/.codex/AGENTS.md"
+fi
 if ! grep -q 'graphify-navigation/SKILL.md' "$HOME/.codex/AGENTS.md" 2>/dev/null; then
     printf '\nFor unfamiliar architecture, cross-file dependencies, or change impact, read ~/.codex/skills/graphify-navigation/SKILL.md before broad repository search.\n' >> "$HOME/.codex/AGENTS.md"
 fi
