@@ -28,7 +28,7 @@ link_config() {
         warn "Backing up $dst → ${dst}.backup.$(date +%s)"
         cp -r "$dst" "${dst}.backup.$(date +%s)"
     fi
-    ln -sf "$src" "$dst"
+    ln -sfn "$src" "$dst"
     ok "$(basename "$dst") → $dst"
 }
 
@@ -465,6 +465,25 @@ for rule in "$SCRIPT_DIR"/claude/rules/*.md; do
     [[ -f "$rule" ]] && link_config "$rule" "$HOME/.claude/rules/$(basename "$rule")"
 done
 ok "Claude Code config linked"
+
+# Share the navigation skill and RTK policy across local coding agents.
+mkdir -p "$HOME/.claude/skills" "$HOME/.codex/skills"
+link_config "$SCRIPT_DIR/agents/skills/graphify-navigation" "$HOME/.claude/skills/graphify-navigation"
+link_config "$SCRIPT_DIR/agents/skills/graphify-navigation" "$HOME/.codex/skills/graphify-navigation"
+link_config "$SCRIPT_DIR/agents/RTK.md" "$HOME/.codex/RTK.md"
+if ! grep -q 'graphify-navigation/SKILL.md' "$HOME/.codex/AGENTS.md" 2>/dev/null; then
+    printf '\nFor unfamiliar architecture, cross-file dependencies, or change impact, read ~/.codex/skills/graphify-navigation/SKILL.md before broad repository search.\n' >> "$HOME/.codex/AGENTS.md"
+fi
+if ! grep -q 'RTK.md' "$HOME/.codex/AGENTS.md" 2>/dev/null; then
+    printf '\nFor verbose local tests, lint, and type checking, read ~/.codex/RTK.md.\n' >> "$HOME/.codex/AGENTS.md"
+fi
+if [[ "$PLATFORM" == "macos" ]]; then
+    mkdir -p "$HOME/Library/Application Support/rtk"
+    link_config "$SCRIPT_DIR/rtk/config.toml" "$HOME/Library/Application Support/rtk/config.toml"
+else
+    mkdir -p "$HOME/.config/rtk"
+    link_config "$SCRIPT_DIR/rtk/config.toml" "$HOME/.config/rtk/config.toml"
+fi
 
 # ── Linux Step 4: Linux services (Docker) ────────────────────────────────────
 if [[ "$PLATFORM" == "linux" ]]; then

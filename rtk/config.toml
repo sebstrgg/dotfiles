@@ -1,0 +1,12 @@
+[tracking]
+enabled = true
+history_days = 30
+
+[tee]
+enabled = true
+mode = "always"
+max_files = 20
+max_file_size = 16777216
+
+[telemetry]
+enabled = false

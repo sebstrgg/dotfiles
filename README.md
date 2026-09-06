@@ -132,7 +132,37 @@ wrapper, etc.) live in `~/.zshrc.local`, **not** the tracked `.zshrc`. This
 keeps installers that append to your rc from corrupting the committed file.
 The first install seeds it from `zsh/.zshrc.local.example`; edit it freely.
 
-## Updating
+## Agent navigation and validation
+
+`graphify-navigation` is a shared Claude/Codex skill for using existing graphs
+on architecture and dependency questions. It checks the indexed corpus first,
+queries narrowly, and verifies current sources. Missing or unidentified graphs
+fall back to ordinary search; partial graphs only help locate current sources.
+The separately installed upstream `graphify` skill
+continues to own explicit builds and semantic extraction; its installation is
+not replaced by the dotfiles installer. The freshness helper uses the installed
+Graphify CLI's Python interpreter without running a package manager.
+
+RTK is installed through the Brewfile. Agents follow [RTK guidance](agents/RTK.md)
+for verbose local validation, without a command-rewrite hook. Configuration
+keeps telemetry off, retains the last 20 raw outputs per output directory (up to
+16 MiB each), and tracks local output savings for 30 days. Start a new agent
+session after setup so it discovers the navigation skill and instructions.
+
+`install.sh` links the shared skill and RTK configuration. To disable this
+integration, remove the `graphify-navigation` links in `~/.claude/skills` and
+`~/.codex/skills`, the Claude Graphify/RTK rules, and the corresponding navigation
+and RTK pointers from your global agent instructions. RTK itself can be removed
+with `brew uninstall rtk`; no hook or shell alias needs undoing.
+
+Verify graph coverage handling locally with:
+
+```sh
+uv tool run --offline --no-cache --from graphifyy python -m unittest discover \
+  -s agents/skills/graphify-navigation/scripts -p 'test_*.py'
+```
+
+## Updating dotfiles
 
 ```bash
 dots-update          # git pull ~/dotfiles (alias defined in .zshrc)

@@ -22,6 +22,7 @@ brew "fd"           # faster find
 brew "jq"           # JSON processor
 brew "yq"           # YAML processor (go version — NOT the python one)
 brew "direnv"       # per-directory environment variables
+brew "rtk"          # compact local validation output for agents
 
 # Python
 brew "uv"           # modern Python package manager (replaces pip/poetry)
