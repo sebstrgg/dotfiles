@@ -85,10 +85,10 @@ alias .....='cd ../../../..'
 alias -- -='cd -'            # jump to previous dir
 
 # eza (modern ls with icons and colors)
-alias ls="eza --icons"
-alias ll="eza --icons -la --git"
-alias lt="eza --icons --tree --level=2"
-alias la="eza --icons -a"
+alias ls="eza --icons=auto"
+alias ll="eza --icons=auto -la --git"
+alias lt="eza --icons=auto --tree --level=2"
+alias la="eza --icons=auto -a"
 
 # bat (cat with syntax highlighting)
 alias cat="bat --paging=never"
