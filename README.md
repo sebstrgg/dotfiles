@@ -152,39 +152,21 @@ Matt's library is a separate global dependency, currently shared at
 `~/.agents/skills`, with runtime/plugin installations as a fallback. The dotfiles
 installer links the orchestrator and global pointers; it does not install or
 upgrade Matt's library. To disable orchestration, remove the
-`engineering-workflow` links from both runtimes, its Claude rule, and its Codex
-global instruction pointer. Keep private global instructions aligned: remove
+`engineering-workflow` links from both runtimes and its pointer in the shared
+global instructions. Keep private global instructions aligned: remove
 older clauses requiring explicit invocation of these workflows.
 `dots-doctor` checks the shared skill links and RTK configuration, and
 `dots-doctor --fix` repairs those links if they drift.
-
-`graphify-navigation` is a shared Claude/Codex skill for using existing graphs
-on architecture and dependency questions. It checks the indexed corpus first,
-queries narrowly, and verifies current sources. Missing or unidentified graphs
-fall back to ordinary search; partial graphs only help locate current sources.
-The separately installed upstream `graphify` skill
-continues to own explicit builds and semantic extraction; its installation is
-not replaced by the dotfiles installer. The freshness helper uses the installed
-Graphify CLI's Python interpreter without running a package manager.
 
 RTK is installed through the Brewfile. Agents follow [RTK guidance](agents/RTK.md)
 for verbose local validation, without a command-rewrite hook. Configuration
 keeps telemetry off, retains the last 20 raw outputs per output directory (up to
 16 MiB each), and tracks local output savings for 30 days. Start a new agent
-session after setup so it discovers the navigation skill and instructions.
+session after setup so it discovers the instructions.
 
-`install.sh` links the shared skill and RTK configuration. To disable this
-integration, remove the `graphify-navigation` links in `~/.claude/skills` and
-`~/.codex/skills`, the Claude Graphify/RTK rules, and the corresponding navigation
-and RTK pointers from your global agent instructions. RTK itself can be removed
+`install.sh` links the RTK configuration. To disable this integration, remove
+the RTK pointer from the shared global instructions. RTK itself can be removed
 with `brew uninstall rtk`; no hook or shell alias needs undoing.
-
-Verify graph coverage handling locally with:
-
-```sh
-uv tool run --offline --no-cache --from graphifyy python -m unittest discover \
-  -s agents/skills/graphify-navigation/scripts -p 'test_*.py'
-```
 
 ## Updating dotfiles
 
