@@ -21,8 +21,10 @@ where they are stricter.
 - Claude: work where judgment, coherence or design quality decide the outcome:
   integration across modules, design-heavy UI, cross-cutting fixes, orchestration. Claude
   may take heavy builds when it is the better fit.
-- Codex `gpt-6.1-sol` at `xhigh`: bounded, well-specified implementation, parallel volume,
-  and capacity when Claude's usage window is tight. Several Codex runs may go in parallel.
+- Codex `gpt-6.1-sol`: bounded, well-specified implementation, parallel volume, and
+  capacity when Claude's usage window is tight. Choose the effort per task: `high` for
+  routine, well-specified work and fast fix rounds; `xhigh` for complex, cross-cutting or
+  high-stakes work and pre-merge reviews. Several Codex runs may go in parallel.
 - Codex `gpt-6-astra` at `high`: selective second opinions on key designs (e.g. a ranking
   or scoring policy), not routine review.
 - Independent review before every merge comes from the other model family: Codex reviews
