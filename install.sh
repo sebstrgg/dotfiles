@@ -485,6 +485,16 @@ else
     link_config "$SCRIPT_DIR/rtk/config.toml" "$HOME/.config/rtk/config.toml"
 fi
 
+# Start each Claude 5-hour usage window as soon as the previous one resets.
+# Copied, not symlinked: launchd does not reliably load symlinked agents.
+if [[ "$PLATFORM" == "macos" ]]; then
+    _keeper_plist="$HOME/Library/LaunchAgents/com.sebastian.claude-window-keeper.plist"
+    cp "$SCRIPT_DIR/launchd/com.sebastian.claude-window-keeper.plist" "$_keeper_plist"
+    launchctl bootout "gui/$(id -u)" "$_keeper_plist" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$_keeper_plist"
+    ok "claude-window-keeper launch agent loaded"
+fi
+
 # ── Linux Step 4: Linux services (Docker) ────────────────────────────────────
 if [[ "$PLATFORM" == "linux" ]]; then
     section_header 4 "${SECTION_TITLES[3]}" \
