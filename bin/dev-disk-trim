@@ -1,0 +1,268 @@
+#!/usr/bin/env bash
+# Reclaim reproducible development data above 58% Data-volume use, down to 55%.
+set -euo pipefail
+
+dry_run=false
+force=false
+for arg in "$@"; do
+	case "$arg" in
+	--dry-run) dry_run=true ;;
+	--force) force=true ;;
+	*)
+		printf 'Usage: dev-disk-trim [--dry-run] [--force]\n' >&2
+		exit 2
+		;;
+	esac
+done
+
+HOME=$(cd "$HOME" && pwd -P)
+export HOME
+log_dir="$HOME/Library/Logs"
+mkdir -p "$log_dir"
+log_file="$log_dir/dev-disk-trim.log"
+lock="$log_dir/dev-disk-trim.lock"
+# shlock checks stale PIDs and acquires the lock atomically on macOS.
+if ! shlock -p "$$" -f "$lock"; then
+	printf '{"action":"lock","status":"already_running"}\n'
+	exit 0
+fi
+trap 'rm -f "$lock" "$lock.log" "$lock.lsof" "$lock.stderr"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+log() {
+	local line bytes
+	line=$(jq -can --arg time "$(date -u +%FT%TZ)" --arg action "$1" \
+		--arg status "$2" --arg target "${3:-}" --argjson dry_run "$dry_run" \
+		--argjson before "${before:-null}" --argjson after "${use_percent:-null}" \
+		'{time:$time,action:$action,status:$status,target:$target,dry_run:$dry_run,
+		  before_percent:$before,after_percent:$after}')
+	printf '%s\n' "$line" | tee -a "$log_file"
+	bytes=$(wc -c <"$log_file")
+	if ((bytes >= 1048576)); then
+		tail -c 900000 "$log_file" | sed '1d' >"$lock.log"
+		mv "$lock.log" "$log_file"
+	fi
+}
+
+measure() {
+	local data
+	if ! data=$(df -k "$HOME" | awk 'NR == 2 {print $3, $4}'); then
+		log measure error
+		exit 1
+	fi
+	read -r used available <<<"$data"
+	if [[ ! $used =~ ^[0-9]+$ || ! $available =~ ^[0-9]+$ ]] || ((used + available == 0)); then
+		log measure invalid
+		exit 1
+	fi
+	total=$((used + available))
+	use_percent=$(awk -v used="$used" -v total="$total" 'BEGIN {printf "%.2f", 100 * used / total}')
+}
+
+measure
+before=$use_percent
+if ((100 * used <= 58 * total)) && ! $force; then
+	log threshold "below_or_equal_58_percent" "$use_percent%"
+	exit 0
+fi
+
+finish() {
+	measure
+	log final "$1" "$before% -> $use_percent%"
+}
+
+checkpoint() {
+	measure
+	if ((100 * used <= 55 * total)); then
+		finish reached_55_percent
+		exit 0
+	fi
+}
+
+building() {
+	local status=0
+	# Exact Rust process names; full command lines for package installs/builds.
+	pgrep -x 'cargo|rustc|cargo-nextest|clippy-driver|rustdoc' >/dev/null 2>&1 || status=$?
+	((status != 1)) && return 0
+	status=0
+	pgrep -f '(^|/|[[:space:]])((npm|npm-cli\.js)[[:space:]]+([^[:space:]]+[[:space:]]+)*(ci|install)|playwright[^[:space:]]*[[:space:]]+([^[:space:]]+[[:space:]]+)*install|uv[[:space:]]+([^[:space:]]+[[:space:]]+)*sync|docker(-buildx)?[[:space:]]+([^[:space:]]+[[:space:]]+)*build)([[:space:]]|$)' >/dev/null 2>&1 || status=$?
+	((status != 1))
+}
+
+run() {
+	local action=$1
+	shift
+	if ! command -v "$1" >/dev/null 2>&1; then
+		log "$action" unavailable "$*"
+	elif $dry_run; then
+		log "$action" would_run "$*"
+	elif "$@" >/dev/null 2>&1; then
+		log "$action" "done" "$*"
+	else
+		log "$action" failed "$*"
+	fi
+	checkpoint
+}
+
+size_over() {
+	local size
+	size=$(du -sk "$1" 2>/dev/null | awk 'NR == 1 {print $1}') || return 1
+	[[ $size =~ ^[0-9]+$ ]] && ((size > $2))
+}
+
+safe_dir() {
+	# Reject symlinks anywhere in a deletion path, including parent directories.
+	[[ -d $1 && ! -L $1 && -O $1 ]] && [[ $(cd "$1" 2>/dev/null && pwd -P) == "$1" ]]
+}
+
+remove_dir() {
+	local action=$1 dir=$2
+	if ! safe_dir "$dir"; then
+		log "$action" unsafe_path "$dir"
+	elif $dry_run; then
+		log "$action" would_remove "$dir"
+	elif rm -rf -- "$dir"; then
+		log "$action" removed "$dir"
+	else
+		log "$action" failed "$dir"
+	fi
+	checkpoint
+}
+
+# Build-output stages are skipped together, and checked again before each trim.
+if building; then
+	log build_output busy
+else
+	for cleaner in "$HOME"/code/*/tools/dev-clean.sh; do
+		[[ -f $cleaner ]] || continue
+		if [[ -L $cleaner ]] || ! safe_dir "${cleaner%/dev-clean.sh}"; then
+			log dev_clean unsafe_path "$cleaner"
+			continue
+		fi
+		if building; then
+			log dev_clean busy "$cleaner"
+			break
+		fi
+		# This helper also deletes protected scratch data and worktrees. Until it
+		# offers a build-output-only mode, use the target trim below instead.
+		common_git=$(git -C "${cleaner%/tools/dev-clean.sh}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+		if [[ $cleaner == "$HOME/code/kimsufi/tools/dev-clean.sh" || $common_git == "$HOME/code/kimsufi/.git" ]] ||
+			cmp -s "$cleaner" "$HOME/code/kimsufi/tools/dev-clean.sh"; then
+			log dev_clean protected_scratch "$cleaner"
+			continue
+		fi
+		if $dry_run; then
+			log dev_clean would_run "$cleaner"
+		elif (cd "${cleaner%/tools/dev-clean.sh}" && bash tools/dev-clean.sh) >/dev/null 2>&1; then
+			log dev_clean "done" "$cleaner"
+		else
+			log dev_clean failed "$cleaner"
+		fi
+		checkpoint
+	done
+	for target in "$HOME"/.cache/*/target "$HOME"/code/*/target; do
+		safe_dir "$target" || continue
+		size_over "$target" 6291456 || continue
+		if building; then
+			log rust_target busy "$target"
+			break
+		fi
+		if [[ $target == "$HOME/code/"* ]]; then
+			tracked=$(git -C "${target%/target}" ls-files -- target 2>/dev/null) || continue
+			[[ -z $tracked ]] || continue
+		fi
+		if $dry_run; then
+			log rust_target would_remove "$target"
+		else
+			# Move away first: a subsequent build creates a fresh target directory.
+			tombstone=$(mktemp -d "${target%/*}/.dev-disk-trim.XXXXXX")
+			if mv "$target" "$tombstone/target"; then
+				remove_dir rust_target "$tombstone"
+			else
+				rmdir "$tombstone"
+				log rust_target rename_failed "$target"
+			fi
+		fi
+		checkpoint
+	done
+fi
+
+run uv_cache uv cache prune
+if [[ -d $HOME/.npm ]] && size_over "$HOME/.npm" 1048576; then
+	run npm_cache npm cache clean --force
+fi
+run pnpm_store pnpm store prune
+
+# Bound daemon requests so a hung socket cannot monopolize the hourly job.
+if command -v docker >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 &&
+	timeout --kill-after=2s 10s docker info >/dev/null 2>&1; then
+	run docker_images timeout --kill-after=5s 120s docker image prune -f
+	run docker_builder timeout --kill-after=5s 120s docker builder prune -f
+else
+	log docker unavailable
+fi
+
+old_enough() {
+	local modified
+	modified=$(stat -f %m "$1" 2>/dev/null) || return 1
+	[[ $modified =~ ^[0-9]+$ ]] && (($(date +%s) - modified > $2))
+}
+
+unused() {
+	local dir=$1
+	# A global scan succeeds even with no files in this tree (lsof +D returns 1).
+	# Default lsof output includes cwd and open files; warnings also fail closed.
+	[[ $dir != *[[:cntrl:]]* && $dir != *\\* ]] || return 1
+	if ! lsof -nP -F n >"$lock.lsof" 2>"$lock.stderr" || [[ -s $lock.stderr ]]; then
+		return 1
+	fi
+	awk -v tree="$dir" '
+		/^n/ {
+			path=substr($0,2)
+			# macOS lsof can retain the /tmp symlink spelling for open files.
+			sub(/^\/tmp(\/|$)/, "/private/tmp/", path)
+			if (path == tree || index(path,tree "/") == 1) found=1
+		}
+		END {exit found ? 1 : 0}' "$lock.lsof"
+}
+
+for dir in /private/tmp/* /private/tmp/.[!.]* /private/tmp/..?*; do
+	safe_dir "$dir" || continue
+	# Never remove a relocated HOME, including this job's log and lock.
+	[[ $HOME != "$dir" && $HOME != "$dir/"* ]] || continue
+	old_enough "$dir" 172800 || continue
+	if unused "$dir"; then
+		# Recheck mtime after the process scan.
+		old_enough "$dir" 172800 && remove_dir temp "$dir"
+	else
+		log temp in_use_or_inspection_failed "$dir"
+	fi
+done
+
+for dir in "$HOME"/.cache/codex-runtimes/codex-runtime-install-*; do
+	safe_dir "$dir" || continue
+	old_enough "$dir" 86400 && remove_dir codex_runtime "$dir"
+done
+
+browser_cache="$HOME/Library/Caches/ms-playwright"
+if safe_dir "$browser_cache"; then
+	for dir in "$browser_cache"/*; do
+		safe_dir "$dir" || continue
+		name=${dir##*/}
+		[[ $name =~ ^([a-z][a-z0-9_]*)-([0-9]{1,9})$ ]] || continue
+		family=${BASH_REMATCH[1]}
+		revision=${BASH_REMATCH[2]}
+		for other in "$browser_cache/$family-"*; do
+			safe_dir "$other" || continue
+			newer=${other##*-}
+			[[ $newer =~ ^[0-9]{1,9}$ ]] || continue
+			if ((10#$newer > 10#$revision)); then
+				remove_dir playwright "$dir"
+				break
+			fi
+		done
+	done
+fi
+
+finish exhausted

@@ -45,6 +45,36 @@ The install script:
 SSH keys and secrets sync from self-hosted Vaultwarden (or Bitwarden cloud).
 Full setup + migration runbook: [docs/bitwarden-rbw-setup.md](docs/bitwarden-rbw-setup.md).
 
+### Development disk trimming (macOS)
+
+`bin/dev-disk-trim` measures Data-volume use as used / (used + available).
+Above 58%, it trims reproducible development output and caches in order, stopping
+at 55%. `--dry-run` reports actions; `--force` bypasses the starting threshold.
+Busy builds keep their output; failed process/file inspections keep the data.
+The hourly launch agent also runs at load. JSON actions and before/after usage
+are logged to `~/Library/Logs/dev-disk-trim.log`, capped below 1 MiB.
+Docker requests are bounded with GNU `timeout` (Homebrew `coreutils`); Docker
+pruning is skipped if that tool or a responsive daemon is unavailable.
+
+The Kimsufi `tools/dev-clean.sh`, its worktree variants, and identical copies are
+skipped because it also deletes protected scratch data and worktrees; its Rust
+target is handled directly. Agent databases,
+Docker volumes, CoreSimulator, and project sources are excluded. This can exhaust
+the safe candidates before reaching 55%; it does not guarantee a usage ceiling.
+
+Install or update explicitly:
+
+```bash
+install -m 755 bin/dev-disk-trim ~/.local/bin/dev-disk-trim
+cp launchd/com.sebastian.dev-disk-trim.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.sebastian.dev-disk-trim.plist
+dev-disk-trim --dry-run --force
+```
+
+Offline checks: `bash tests/dev-disk-trim.test.sh`,
+`shellcheck bin/dev-disk-trim tests/dev-disk-trim.test.sh`, and
+`shfmt -d bin/dev-disk-trim tests/dev-disk-trim.test.sh`.
+
 ### Atuin — shell history sync
 
 Atuin syncs encrypted shell history across all machines. The installer prompts for your server URL (self-hosted or Atuin Cloud) and handles registration interactively.
