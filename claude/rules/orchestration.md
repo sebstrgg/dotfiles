@@ -4,8 +4,8 @@ Claude Code specifics for the shared multi-agent rules in the global instruction
 
 ## Subagents
 
-- Pass `model` on every Agent call, chosen from the global menu: `haiku`, `sonnet` or
-  `opus`. Grunt work that needs no Claude judgment goes to Codex instead.
+- Pass `model` on every Agent call (`opus`, `sonnet` or `haiku`), chosen per the global
+  Delegation section. Building work that needs no Claude tools goes to Codex instead.
 - Claude subagents stop with the session; resume them by ID from the ledger. Re-arm
   watchers after restarts.
 - Wait with `run_in_background` and its completion notification, or Monitor with an
