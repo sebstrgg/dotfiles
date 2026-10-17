@@ -162,7 +162,7 @@ wrapper, etc.) live in `~/.zshrc.local`, **not** the tracked `.zshrc`. This
 keeps installers that append to your rc from corrupting the committed file.
 The first install seeds it from `zsh/.zshrc.local.example`; edit it freely.
 
-## Global agent workflows, navigation, and validation
+## Global agent workflows and navigation
 
 These integrations are user-wide for Claude Code and Codex, across projects on
 the configured machine. Start a new agent session after installation. Each
@@ -185,18 +185,10 @@ upgrade Matt's library. To disable orchestration, remove the
 `engineering-workflow` links from both runtimes and its pointer in the shared
 global instructions. Keep private global instructions aligned: remove
 older clauses requiring explicit invocation of these workflows.
-`dots-doctor` checks the shared skill links and RTK configuration, and
-`dots-doctor --fix` repairs those links if they drift.
-
-RTK is installed through the Brewfile. Agents follow [RTK guidance](agents/RTK.md)
-for verbose local validation, without a command-rewrite hook. Configuration
-keeps telemetry off, retains the last 20 raw outputs per output directory (up to
-16 MiB each), and tracks local output savings for 30 days. Start a new agent
-session after setup so it discovers the instructions.
-
-`install.sh` links the RTK configuration. To disable this integration, remove
-the RTK pointer from the shared global instructions. RTK itself can be removed
-with `brew uninstall rtk`; no hook or shell alias needs undoing.
+The shared [session handoff](agents/skills/session-handoff/SKILL.md) skill keeps
+the effort's ledger current and prints a short starter prompt for a fresh
+session. `dots-doctor` checks both shared skill links, and `dots-doctor --fix`
+repairs them if they drift.
 
 ## Updating dotfiles
 

@@ -95,8 +95,12 @@ alias cat="bat --paging=never"
 alias catp="bat"
 
 # Safety / quality of life
-alias cp='cp -iv'            # confirm + verbose on overwrite
-alias mv='mv -iv'
+# Confirm-on-overwrite only at a terminal: agent shells snapshot these aliases
+# and hang on the prompt.
+if [[ -t 0 && -t 1 && -z $CLAUDECODE ]]; then
+  alias cp='cp -iv'
+  alias mv='mv -iv'
+fi
 alias mkdir='mkdir -p'
 alias reload='exec zsh'      # full shell restart
 alias path='print -l $path'  # print PATH one entry per line

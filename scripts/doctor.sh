@@ -94,14 +94,10 @@ for _rule in "$REPO_DIR"/claude/rules/*.md; do
     [[ -f "$_rule" ]] || continue
     check_link "claude/rules/$(basename "$_rule")" "$HOME/.claude/rules/$(basename "$_rule")"
 done
-check_link "agents/skills/engineering-workflow" "$HOME/.claude/skills/engineering-workflow"
-check_link "agents/skills/engineering-workflow" "$HOME/.codex/skills/engineering-workflow"
-check_link "agents/RTK.md" "$HOME/.codex/RTK.md"
-if [[ "$PLATFORM" == "Darwin" ]]; then
-    check_link "rtk/config.toml" "$HOME/Library/Application Support/rtk/config.toml"
-else
-    check_link "rtk/config.toml" "$HOME/.config/rtk/config.toml"
-fi
+for _skill in engineering-workflow session-handoff; do
+    check_link "agents/skills/$_skill" "$HOME/.claude/skills/$_skill"
+    check_link "agents/skills/$_skill" "$HOME/.codex/skills/$_skill"
+done
 
 # ── 2. Copied configs (owned/rewritten by an app → not symlinked) ───
 hdr "Copied configs (app-owned)"
@@ -136,7 +132,7 @@ hdr "Tools on PATH"
 check_cmd() {
     if command -v "$1" &>/dev/null; then ok "$1"; else warn "$1 not on PATH"; fi
 }
-for _c in zsh tmux starship atuin delta eza bat fzf zoxide rg fd git rtk; do
+for _c in zsh tmux starship atuin delta eza bat fzf zoxide rg fd git; do
     check_cmd "$_c"
 done
 if [[ "$PLATFORM" == "Darwin" ]]; then check_cmd brew; else check_cmd rbw; fi

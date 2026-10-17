@@ -1,6 +1,6 @@
 ---
 name: engineering-workflow
-description: Select Matt Pocock workflows automatically for planning, design decisions, specs, tickets, implementation, debugging, research, review, and handoffs. Use at task intake and when the work changes phase; handle small, settled edits directly.
+description: Select Matt Pocock workflows automatically for planning, design decisions, specs, tickets, implementation, debugging, research, and review. Use at task intake and when the work changes phase; handle small, settled edits directly.
 ---
 
 # Engineering workflow
@@ -18,6 +18,9 @@ existing project artifacts to identify what remains unresolved.
 
 - For a small, settled edit or straightforward factual answer, work directly.
   A task does not need an interview, spec, or tickets just because it is code.
+- A subagent or dispatched worker with a bounded brief executes the brief
+  directly; the dispatcher has already selected the phase and names any
+  playbook the worker needs.
 - For substantive work, read the installed `ask-matt/SKILL.md` routing reference
   once, then read the selected playbook and the references it requires. Prefer
   the shared library at `~/.agents/skills/<name>/SKILL.md`, available to both
@@ -33,10 +36,11 @@ Use the upstream routes with these entry and completion conditions:
 | A design question needs runnable evidence or visual alternatives | `prototype` | The question has evidence and Sebastian has selected any unresolved design direction |
 | An agreed substantial change needs a durable implementation contract, especially across sessions | `to-spec` | The spec captures agreed behavior, boundaries, and test seams |
 | An agreed effort needs multiple independently verifiable delivery slices | `to-tickets` | Complete ticket drafts define acceptance criteria and real blocking edges, ready for breakdown review |
-| A spec, ticket, or bounded feature is ready and implementation is authorized | `implement`, with its applicable `tdd` and `code-review` steps | The requested behavior is verified and the change reviewed |
+| A spec, ticket, or bounded feature is ready and implementation is authorized | `implement`, with its applicable `tdd` and `code-review` steps | The requested behavior is verified and reviewed under the global review rule |
+| A session is ending, waiting past the cache lifetime, or moving to a fresh session | `session-handoff` | The ledger is current and the starter prompt is in chat |
 
 Use `ask-matt` for the other routes: difficult bugs, research, domain language,
-architecture, incoming-issue triage, large unresolved efforts, and handoffs.
+architecture, incoming-issue triage, and large unresolved efforts.
 Choose from the actual situation, not a keyword alone. Existing decisions and
 artifacts let work enter at any phase; the idea-to-ship flow is not a mandatory
 pipeline. Read only the playbooks needed for the current phase.

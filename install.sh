@@ -466,23 +466,14 @@ for rule in "$SCRIPT_DIR"/claude/rules/*.md; do
 done
 ok "Claude Code config linked"
 
-# Share workflow selection and RTK policy across local coding agents.
+# Share workflow skills across local coding agents.
 mkdir -p "$HOME/.claude/skills" "$HOME/.codex/skills"
-link_config "$SCRIPT_DIR/agents/skills/engineering-workflow" "$HOME/.claude/skills/engineering-workflow"
-link_config "$SCRIPT_DIR/agents/skills/engineering-workflow" "$HOME/.codex/skills/engineering-workflow"
-link_config "$SCRIPT_DIR/agents/RTK.md" "$HOME/.codex/RTK.md"
+for skill in engineering-workflow session-handoff; do
+    link_config "$SCRIPT_DIR/agents/skills/$skill" "$HOME/.claude/skills/$skill"
+    link_config "$SCRIPT_DIR/agents/skills/$skill" "$HOME/.codex/skills/$skill"
+done
 if ! grep -q 'engineering-workflow/SKILL.md' "$HOME/.codex/AGENTS.md" 2>/dev/null; then
     printf '\nFor planning, design decisions, specs, tickets, implementation, debugging, research, review, or handoffs, read ~/.codex/skills/engineering-workflow/SKILL.md at intake and phase changes. Select applicable Matt Pocock playbooks automatically; slash commands are optional. Small, settled work stays direct.\n' >> "$HOME/.codex/AGENTS.md"
-fi
-if ! grep -q 'RTK.md' "$HOME/.codex/AGENTS.md" 2>/dev/null; then
-    printf '\nFor verbose local tests, lint, and type checking, read ~/.codex/RTK.md.\n' >> "$HOME/.codex/AGENTS.md"
-fi
-if [[ "$PLATFORM" == "macos" ]]; then
-    mkdir -p "$HOME/Library/Application Support/rtk"
-    link_config "$SCRIPT_DIR/rtk/config.toml" "$HOME/Library/Application Support/rtk/config.toml"
-else
-    mkdir -p "$HOME/.config/rtk"
-    link_config "$SCRIPT_DIR/rtk/config.toml" "$HOME/.config/rtk/config.toml"
 fi
 
 # Start each Claude 5-hour usage window as soon as the previous one resets.
