@@ -476,14 +476,17 @@ if ! grep -q 'engineering-workflow/SKILL.md' "$HOME/.codex/AGENTS.md" 2>/dev/nul
     printf '\nFor planning, design decisions, specs, tickets, implementation, debugging, research, review, or handoffs, read ~/.codex/skills/engineering-workflow/SKILL.md at intake and phase changes. Select applicable Matt Pocock playbooks automatically; slash commands are optional. Small, settled work stays direct.\n' >> "$HOME/.codex/AGENTS.md"
 fi
 
-# Start each Claude 5-hour usage window as soon as the previous one resets.
-# Copied, not symlinked: launchd does not reliably load symlinked agents.
+# Launch agents: Claude usage-window keeper, development disk trim, and
+# Bitwarden bridge expiry. Copied, not symlinked: launchd does not reliably
+# load symlinked agents.
 if [[ "$PLATFORM" == "macos" ]]; then
-    _keeper_plist="$HOME/Library/LaunchAgents/com.sebastian.claude-window-keeper.plist"
-    cp "$SCRIPT_DIR/launchd/com.sebastian.claude-window-keeper.plist" "$_keeper_plist"
-    launchctl bootout "gui/$(id -u)" "$_keeper_plist" 2>/dev/null || true
-    launchctl bootstrap "gui/$(id -u)" "$_keeper_plist"
-    ok "claude-window-keeper launch agent loaded"
+    for _src in "$SCRIPT_DIR"/launchd/*.plist; do
+        _plist="$HOME/Library/LaunchAgents/$(basename "$_src")"
+        cp "$_src" "$_plist"
+        launchctl bootout "gui/$(id -u)" "$_plist" 2>/dev/null || true
+        launchctl bootstrap "gui/$(id -u)" "$_plist"
+        ok "$(basename "$_src" .plist) launch agent loaded"
+    done
 fi
 
 # ── Linux Step 4: Linux services (Docker) ────────────────────────────────────

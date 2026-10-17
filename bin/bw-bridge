@@ -4,15 +4,61 @@
 # Interactive by design: the master password goes only into bw's own prompt.
 # The session (revocable, not the master password) is passed to `security`
 # as an argument — brief ps exposure, within the same-user Keychain tradeoff
-# documented in ~/code/personal-infra/runbooks/access/bitwarden.md.
+# documented in ~/code/personal-infra/runbooks/bitwarden/access.md.
+#
+#   bw-bridge [HOURS]   unlock and keep the session for HOURS (default 12)
+#   bw-bridge expire    lock and remove the session once its time is up
+#                       (run by the com.sebastian.bw-bridge-expire agent)
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BW_CLI="$SCRIPT_DIR/bw-vault"
+SERVICE=personal-infra-bitwarden-session
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/bw-bridge"
+EXPIRES_AT="$STATE_DIR/expires-at"
+DEFAULT_HOURS=12
 
 if [[ ! -x "$BW_CLI" ]]; then
 	echo "ERROR: compatible Bitwarden wrapper is missing: $BW_CLI" >&2
 	exit 1
+fi
+
+cached_session() {
+	/usr/bin/security find-generic-password -a "$USER" -s "$SERVICE" -w 2>/dev/null
+}
+
+expire() {
+	local session now
+	session="$(cached_session)" || {
+		rm -f "$EXPIRES_AT"
+		return 0
+	}
+	now=$(date +%s)
+	if [[ ! -f "$EXPIRES_AT" ]]; then
+		# A session bridged before expiry existed gets the default lifetime.
+		mkdir -p "$STATE_DIR"
+		echo $((now + DEFAULT_HOURS * 3600)) >"$EXPIRES_AT"
+		return 0
+	fi
+	if ((now < $(<"$EXPIRES_AT"))); then
+		return 0
+	fi
+	BW_SESSION="$session" "$BW_CLI" lock >/dev/null 2>&1 || true
+	unset session
+	/usr/bin/security delete-generic-password -a "$USER" -s "$SERVICE" >/dev/null 2>&1 || true
+	rm -f "$EXPIRES_AT"
+	echo "bw-bridge: session expired and closed"
+}
+
+if [[ "${1:-}" == expire ]]; then
+	expire
+	exit 0
+fi
+
+hours="${1:-$DEFAULT_HOURS}"
+if [[ ! "$hours" =~ ^[1-9][0-9]*$ ]]; then
+	echo "usage: bw-bridge [HOURS] | bw-bridge expire" >&2
+	exit 64
 fi
 
 status="$("$BW_CLI" status | jq -r .status)"
@@ -21,16 +67,18 @@ if [[ "$status" == "unauthenticated" ]]; then
 fi
 
 session="$("$BW_CLI" unlock --raw)"
-/usr/bin/security add-generic-password \
-	-U -a "$USER" -s personal-infra-bitwarden-session -w "$session"
+/usr/bin/security add-generic-password -U -a "$USER" -s "$SERVICE" -w "$session"
 unset session
 
-check="$(BW_SESSION="$(/usr/bin/security find-generic-password \
-	-a "$USER" -s personal-infra-bitwarden-session -w)" "$BW_CLI" status | jq -r .status)"
+check="$(BW_SESSION="$(cached_session)" "$BW_CLI" status | jq -r .status)"
 if [[ "$check" != "unlocked" ]]; then
 	echo "ERROR: cached session does not unlock the vault (status: $check)" >&2
 	exit 1
 fi
 
-echo "OK: verified Bitwarden session cached in Login Keychain (personal-infra-bitwarden-session)."
-echo "When finished:  security delete-generic-password -a \"\$USER\" -s personal-infra-bitwarden-session"
+mkdir -p "$STATE_DIR"
+expires=$(($(date +%s) + hours * 3600))
+echo "$expires" >"$EXPIRES_AT"
+
+echo "OK: verified Bitwarden session cached in Login Keychain ($SERVICE) until $(date -r "$expires" '+%a %H:%M')."
+echo "Close early:  ~/code/personal-infra/tools/access/bitwarden-session close"
