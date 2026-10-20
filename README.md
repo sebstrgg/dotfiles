@@ -170,13 +170,25 @@ project keeps its own graph and planning artifacts; global installation does
 not create a graph for every project or configure other machines automatically.
 
 The shared [engineering workflow](agents/skills/engineering-workflow/SKILL.md)
-selects Matt Pocock playbooks from the work's current phase. Unresolved decisions
-trigger grilling; substantial agreed work gets a spec and, when needed, delivery
-tickets. Small, settled tasks stay direct. The orchestrator reads manual-only
-upstream playbooks as references under Sebastian's standing authorization, so
-their slash commands need no metadata patches or plugin-cache edits. External
-publication still follows the user's approval rules; reviewable drafts come
-first. Existing decisions satisfy matching workflow checkpoints.
+selects and applies Matt Pocock playbooks throughout the session as requirements,
+evidence and phase change. New projects and every new or changed feature follow
+grilling, `to-spec`, `to-tickets` and `implement-spec`, with verification and
+review. Small features use concise artifacts; questions and mechanical repairs
+use the relevant focused workflow. Existing approved decisions and artifacts
+satisfy matching checkpoints. Substantial rework, escaped defects and repeated
+steering trigger `retro`.
+
+The workflow's [new-project baseline](agents/skills/engineering-workflow/references/new-project.md)
+puts Sebastian-owned project repositories in `wl7r`, includes ownership transfer
+in repository onboarding, and requires working CI/CD using the canonical
+personal-infra interfaces. Visibility, farm admission and deployment authority
+remain explicit; an unverified pipeline is incomplete setup.
+
+The orchestrator uses native skill invocation where available and otherwise
+reads and applies manual-only playbooks under Sebastian's standing
+authorization. Slash commands need no metadata patches or plugin-cache edits.
+External publication and live actions follow the user's approval rules;
+reviewable drafts come first.
 
 Matt's library is a separate global dependency, currently shared at
 `~/.agents/skills`, with runtime/plugin installations as a fallback. The dotfiles
