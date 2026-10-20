@@ -162,45 +162,42 @@ wrapper, etc.) live in `~/.zshrc.local`, **not** the tracked `.zshrc`. This
 keeps installers that append to your rc from corrupting the committed file.
 The first install seeds it from `zsh/.zshrc.local.example`; edit it freely.
 
-## Global agent workflows and navigation
+## Global agent workflows
 
-These integrations are user-wide for Claude Code and Codex, across projects on
-the configured machine. Start a new agent session after installation. Each
-project keeps its own graph and planning artifacts; global installation does
-not create a graph for every project or configure other machines automatically.
+These integrations are user-wide for Claude Code and Codex on the configured
+machine. Start a new agent session after installation.
 
-The shared [engineering workflow](agents/skills/engineering-workflow/SKILL.md)
-selects and applies Matt Pocock playbooks throughout the session as requirements,
-evidence and phase change. New projects and every new or changed feature follow
-grilling, `to-spec`, `to-tickets` and `implement-spec`, with verification and
-review. Small features use concise artifacts; questions and mechanical repairs
-use the relevant focused workflow. Existing approved decisions and artifacts
-satisfy matching checkpoints. Substantial rework, escaped defects and repeated
-steering trigger `retro`.
+- **Policy.** `agents/global-instructions.md` is private (gitignored) and is
+  linked as `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. A public clone has
+  no copy; the installer warns and skips it.
+- **Skills**, linked into both runtimes:
+  [`engineering-workflow`](agents/skills/engineering-workflow/SKILL.md) is the
+  single path from request to verified result and routes to the other
+  playbooks (Matt Pocock's library, installed separately under
+  `~/.agents/skills`). [`verify`](agents/skills/verify/SKILL.md) is the
+  independent done-check, [`delegate`](agents/skills/delegate/SKILL.md) covers
+  models and workers, [`continue`](agents/skills/continue/SKILL.md) starts a
+  fresh session from an effort file, and
+  [`weekly-review`](agents/skills/weekly-review/SKILL.md) is run on a weekly
+  schedule.
+- **Effort files.** Work state lives in `.scratch/<effort>/effort.md` in the
+  project (gitignored), from
+  [the template](agents/skills/engineering-workflow/templates/effort.md).
+  [`bin/effort-gate`](bin/effort-gate) keeps an agent from ending its turn
+  while that file has unfinished "done when" items, and points the agent back
+  at the file after context compaction. It runs as the Stop and post-compaction
+  hook in both runtimes (`claude/settings.json`, `codex/hooks.json`; Codex asks
+  once to trust new hooks via `/hooks`). Tests: `python3 tests/effort-gate.test.py`.
+- **Tripwires.** `claude/settings.json` denies, and
+  [`codex/rules/tripwires.rules`](codex/rules/tripwires.rules) forbids,
+  force-push, repository deletion and settings changes, Docker volume removal
+  and wiping `/` or `~`. Codex ignores symlinked rule files, so the installer
+  copies this one.
+- `bin/agent-messages --days N` lists Sebastian's own messages from local
+  Claude and Codex sessions, for the weekly review.
 
-The workflow's [new-project baseline](agents/skills/engineering-workflow/references/new-project.md)
-puts Sebastian-owned project repositories in `wl7r`, includes ownership transfer
-in repository onboarding, and requires working CI/CD using the canonical
-personal-infra interfaces. Visibility, farm admission and deployment authority
-remain explicit; an unverified pipeline is incomplete setup.
-
-The orchestrator uses native skill invocation where available and otherwise
-reads and applies manual-only playbooks under Sebastian's standing
-authorization. Slash commands need no metadata patches or plugin-cache edits.
-External publication and live actions follow the user's approval rules;
-reviewable drafts come first.
-
-Matt's library is a separate global dependency, currently shared at
-`~/.agents/skills`, with runtime/plugin installations as a fallback. The dotfiles
-installer links the orchestrator and global pointers; it does not install or
-upgrade Matt's library. To disable orchestration, remove the
-`engineering-workflow` links from both runtimes and its pointer in the shared
-global instructions. Keep private global instructions aligned: remove
-older clauses requiring explicit invocation of these workflows.
-The shared [session handoff](agents/skills/session-handoff/SKILL.md) skill keeps
-the effort's ledger current and prints a short starter prompt for a fresh
-session. `dots-doctor` checks both shared skill links, and `dots-doctor --fix`
-repairs them if they drift.
+`dots-doctor` checks the links, the copied tripwire file and the seeded
+settings; `dots-doctor --fix` repairs drift.
 
 ## Updating dotfiles
 

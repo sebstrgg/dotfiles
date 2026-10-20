@@ -1,111 +1,109 @@
 ---
 name: engineering-workflow
-description: Apply Sebastian's engineering framework throughout a task. Route new projects and feature changes through grilling, specs, tickets, implementation and verification; select the relevant playbook when intent, evidence or phase changes.
+description: Sebastian's path from request to verified result. Use at the start of any engineering task (feature, fix, new project, infrastructure change, review, diagnosis) and when scope, evidence or phase changes.
 ---
 
 # Engineering workflow
 
-Sebastian authorizes automatic selection and application of installed Matt
-Pocock playbooks, including manual-only slash commands. Use native skill
-invocation when available; otherwise read and apply the installed `SKILL.md` as
-a nested playbook. Reading its name or mentioning it is not execution. The
-adaptations below express Sebastian's preferences; global authority, safety and
-review rules still apply.
+One path for every change: intake, plan, build, prove and review, deliver,
+verify, close. The
+global instructions own authority and the meaning of done; this skill owns the
+sequence. Questions, reviews and diagnosis stop after intake with an answer
+unless a change is requested.
 
-## 1. Route throughout the session
+## 1. Intake
 
-At intake, a phase boundary, changed requirements, or evidence that invalidates
-the current approach, identify the next applicable playbook and apply it without
-waiting for a slash command. On resume or handoff, recover the current phase,
-decisions and evidence from the effort's existing ledger and artifacts.
+- Gather context: repository instructions, docs and ADRs, and any active
+  `.scratch/*/effort.md` for this work. An active effort file is the resume
+  point: continue from its next step.
+- Write the effort file at `.scratch/<effort>/effort.md` from
+  [the template](templates/effort.md), with `checkout:` set to this checkout's
+  absolute path. Make sure `.scratch/` is gitignored.
+- Scale to the risk. A low-risk change finished in one sitting (no reserved
+  action, no persisted data, easy to revert) skips the effort file, planning
+  and the fresh verifier: make it, check it once on the real target, report
+  the evidence.
+- A clear request is the approved brief. Otherwise ask once: numbered questions,
+  each with your recommendation. For a new project, or a big feature with
+  unsettled intent, run `grilling` until the brief's "done when" list is
+  settled.
+- In Codex, also set a goal (`create_goal`) whose objective is the outcome.
 
-- Every new project, new feature or changed feature follows the feature path
-  below. Small features still get a concise spec and at least one ticket.
-  Existing approved artifacts can satisfy a phase when they cover the current
-  request; update affected artifacts when the scope changes.
-- Questions, status, reviews, mechanical edits and repairs that restore agreed
-  behavior use their relevant focused workflow. A repair that introduces new
-  behavior or a new product decision enters the feature path.
-- A subagent or dispatched worker with a bounded brief executes the brief
-  directly. The orchestrator owns the full path and gives each worker the
-  applicable playbook and context pointers.
-- Read `ask-matt/SKILL.md` once when routing substantive work, then the selected
-  playbook and required references. Prefer `~/.agents/skills/<name>/SKILL.md`;
-  resolve missing names from runtime skills or the Matt Pocock plugin. If a
-  required playbook remains unavailable, report the specific gap and continue
-  independent work without claiming that phase complete.
+Intake is complete when the effort file holds the outcome, "done when" items
+checkable on the real target, the approvals given, and a budget.
 
-## 2. Feature path
+## 2. Plan
 
-For a new project or repository onboarding, also apply
-[New project baseline](references/new-project.md) while defining the spec and
-tickets. Project setup and working CI/CD are part of delivery.
+- Small work: the effort file is the plan.
+- Work spanning sessions or parallel lanes: `to-spec`, then `to-tickets` into
+  `.scratch/<effort>/`, then `implement-spec` with lanes run per `delegate`.
+- Pull in on demand: `codebase-design` for a consequential structure,
+  `domain-modeling` for unclear terms, `research` for an open factual
+  question, `prototype` when a question needs runnable evidence.
+- UI, visual design or copy: [design reference](references/design.md).
+- New project or onboarding a repository: [new-project baseline](references/new-project.md).
 
-| Phase | Playbook | Evidence required to advance |
-| --- | --- | --- |
-| Resolve intent | `grilling`; `grill-with-docs` when project decisions need a durable home | Relevant facts are investigated and Sebastian has confirmed shared understanding. Reuse settled answers; ask only unresolved decisions. |
-| Resolve a design needing runnable or visual evidence | `prototype` when needed | The experiment answers the question and Sebastian selects any unresolved design direction. |
-| Define the outcome | `to-spec` | A durable spec captures agreed behavior, boundaries, decisions, verification and exclusions. |
-| Define delivery slices | `to-tickets` | Tickets have observable acceptance criteria and genuine blocking edges; Sebastian has approved the breakdown. |
-| Deliver the spec | `implement-spec` | All tickets in the authorized scope are implemented and integrated, with evidence for every acceptance criterion and remaining graph work identified. |
-| Verify and review | The applicable `tdd` and `code-review` steps, plus the global review rule | The actual user or operator outcome is demonstrated, confirmed findings are fixed and rechecked, and completion evidence applies to the final changes. |
+Installed playbooks contain steps that wait for the user: confirm seams,
+approve a breakdown, confirm understanding, name a fixed point. The approved
+brief satisfies every one of them: decide, record the decision in the effort
+file, continue. Grilling for a new project or big feature is the exception,
+because it produces the brief.
 
-Invoke other playbooks when the work calls for them: diagnosis for a resisting
-failure, research for an unresolved factual question, domain modeling for
-ambiguous terminology, and design or architecture work for a consequential
-structural decision. Return to the affected spec and tickets after resolving it.
-Use `session-handoff` at the global handoff boundary.
+## 3. Build
 
-## 3. Apply playbooks within the task's authority
+- Drive behaviour test-first (`tdd`) at seams you choose.
+- Fix the class, not the instance: before a narrow fix, find every sibling of
+  the defect and fix or report the whole set.
+- A failure that resists a first look: `diagnosing-bugs`, starting from a red
+  loop.
+- Commit in small meaningful steps; update docs the change touches as you go.
 
-Briefly name a selected workflow and its purpose when changing phase. Apply its
-steps and inspect the resulting artifacts and evidence. Keep routine selection
-and technical implementation decisions with the agent.
+## 4. Prove and review
 
-Already supplied or approved decisions satisfy the matching upstream
-checkpoints. Preserve shared-understanding, design-selection, spec verification
-and ticket-breakdown checkpoints; combine compatible reviews into one concrete
-proposal. Explain verification choices through observable behavior so Sebastian
-can judge the outcome. Prepare complete local drafts first. Keep artifacts
-proportionate: a small feature may need one short spec and one complete ticket.
+Run these in order; each can still change the work, so none waits behind a slow
+check:
 
-Use the project's canonical artifact locations; otherwise use
-`.scratch/<feature>/spec.md` and one file per ticket in
-`.scratch/<feature>/issues/`. Unapproved tickets remain drafts. Missing tracker
-setup does not block local drafting or authorize provisioning a tracker.
+1. Prove the change has the intended effect on the real target or real data,
+   with the fastest decisive check, and record the evidence in the effort file.
+2. Code where a missed bug is expensive (security, auth or secrets, persisted
+   data, migrations or deletion, concurrency, paid calls, public contracts, a
+   large cross-module change) gets one cross-family `code-review`. Fix
+   confirmed findings and re-check once.
+3. Full CI and slow suites run once, on the final change.
 
-`implement-spec` coordinates the graph within the requested scope. A request to
-implement one ticket authorizes that ticket; retain the remaining graph as
-context and report its state. Apply the global delegation rule:
-execute a single bounded ticket directly in the task worktree when that is
-sufficient, and delegate independent lanes when it creates value. Name the
-implementation playbooks in each brief, respect active ownership, integrate
-serially, and independently verify workers' completion claims. Reuse completed
-verification when it still covers the final state.
+Infrastructure and configuration: live readback plus the affected behaviour.
+Docs: compared with their source.
 
-Automatic skill selection does not expand action authority. Issue publication,
-messages, repository changes at the hosting provider, pushes, PRs, merges and
-deployments follow the current task's authorizations and global approval rules.
-Check existing authorization before asking again. A discussion stays a
-discussion until implementation is requested.
+## 5. Deliver
 
-## 4. Uphold the framework and correct course
+Follow [delivery](references/delivery.md): branches, pull requests, merge,
+deploy. Internal delivery proceeds; external actions need an approval recorded
+in the effort file.
 
-Before substantive implementation, check the relevant context, tools and access
-in the executing environment, and establish how the intended outcome will be
-proved. At phase transitions, compare the actual work with the agreed spec,
-constraints and global standards. Keep the phase, artifact pointers, decisions,
-unresolved gaps and next step in the existing effort ledger.
+## 6. Verify
 
-When a prerequisite, standard or acceptance criterion is unmet, investigate and
-correct it within scope, then verify the correction. Return to grilling when
-intent forks; revise the spec and affected tickets before continuing changed
-behavior. Reopen completion when new evidence contradicts it. Preserve the
-accepted quality bar; propose explicit changes when the framework itself is
-causing a poor outcome.
+Dispatch a fresh agent to run `verify` against the "done when" list on the real
+target (after deploy when the outcome lives on a deployed service), from the
+other model family where available, per `delegate`. Fix what fails and verify
+again. Verification is complete when every item passes.
 
-After substantial rework, an escaped defect or repeated steering, apply `retro`.
-Prefer repairing an existing tool, check or canonical source over adding
-instructions. Complete authorized improvements and identify concrete proposals
-outside scope. Continue authorized work until the requested outcome is proved
-or a real decision or evidenced blocker requires Sebastian.
+## 7. Close
+
+- Move lasting decisions into the project's docs (ADR, README, `AGENTS.md`).
+- Delete the effort file and any plan, spec or ticket files the work made
+  obsolete.
+- Remove the worktrees, branches, containers and background jobs this work
+  created.
+- Report the outcome, the evidence, decisions worth knowing, and what
+  Sebastian needs to do.
+- After substantial rework, an escaped defect or repeated steering: `retro`,
+  then fix the environment (a check, a tool, or one rule) rather than adding
+  prose.
+
+## Staying on course
+
+- The stop gate blocks ending a turn while the active effort file has open
+  items. To stop legitimately, set `status: blocked` with the blocker recorded,
+  or `status: done` after `verify` passes.
+- Keep the effort file current whenever a decision, approval, item status or
+  next step changes. After compaction it is the source of truth.

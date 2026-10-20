@@ -23,6 +23,9 @@ product, and complete it as part of the requested project setup.
   development commands and a clear verification entry point. Put purpose,
   navigation, data boundaries and operating decisions in the project's existing
   documentation layout. Keep credentials and private evaluation data out of Git.
+- Gitignore `.scratch/` so effort files stay local.
+- A project with a UI starts with its design system, `DESIGN.md` and lint
+  checks from the [design reference](design.md), before the first screen.
 
 ## Reuse the canonical infrastructure
 

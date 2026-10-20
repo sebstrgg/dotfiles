@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Hook for Claude Code and Codex: keep a run going while its effort has open items.
+
+  effort-gate stop     Stop hook: block ending the turn while the active effort
+                       file in this checkout has open "done when" items.
+  effort-gate context  Compaction hook: point the agent back at the effort file.
+
+An effort file is `.scratch/<effort>/effort.md` with front matter `status: active`
+and `checkout:` equal to this checkout. Copies in other worktrees never match.
+"""
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+MAX_IDENTICAL_BLOCKS = 5
+
+
+def read_event():
+    try:
+        event = json.loads(sys.stdin.read() or '{}')
+    except ValueError:
+        event = {}
+    return event if isinstance(event, dict) else {}
+
+
+def checkout_root(cwd):
+    try:
+        result = subprocess.run(['git', '-C', str(cwd), 'rev-parse', '--show-toplevel'],
+                                capture_output=True, text=True, timeout=3, check=False)
+        if result.returncode == 0 and result.stdout.strip():
+            return Path(result.stdout.strip()).resolve()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return Path(cwd).resolve()
+
+
+def front_matter(text):
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != '---':
+        return {}
+    fields = {}
+    for line in lines[1:]:
+        if line.strip() == '---':
+            break
+        key, _, value = line.partition(':')
+        fields[key.strip()] = value.split('#')[0].strip()
+    return fields
+
+
+FINISHED = {'pass', 'blocked'}
+
+
+def open_items(text):
+    """Rows of the "Done when" table not yet `pass` or `blocked`: any other status,
+    including `fail` or a misspelling, keeps the item open."""
+    rows, header, in_section = [], None, False
+    for line in text.splitlines():
+        if line.startswith('## '):
+            in_section = line[3:].strip().lower() == 'done when'
+            continue
+        if not in_section or not line.strip().startswith('|'):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
+        if header is None:
+            header = [cell.lower() for cell in cells]
+        elif not all(set(cell) <= set('-: ') for cell in cells):
+            row = dict(zip(header, cells))
+            if row.get('status', '').strip('`* ').lower() not in FINISHED:
+                rows.append(f"#{row.get('#', '?')} {row.get('item', '').strip()}".strip())
+    return rows
+
+
+def active_effort(cwd):
+    root = checkout_root(cwd)
+    for path in sorted(root.glob('.scratch/*/effort.md')):
+        try:
+            text = path.read_text(errors='replace')
+        except OSError:
+            continue
+        fields = front_matter(text)
+        checkout = fields.get('checkout', '')
+        if fields.get('status') == 'active' and checkout and Path(checkout).expanduser().resolve() == root:
+            return path, text
+    return None, None
+
+
+def counter_path(session_id):
+    name = hashlib.sha256(str(session_id).encode()).hexdigest()[:16]
+    return Path(tempfile.gettempdir()) / 'effort-gate' / name
+
+
+def stop(event):
+    path, text = active_effort(event.get('cwd') or os.getcwd())
+    if path is None:
+        return None
+    items = open_items(text)
+    counter = counter_path(event.get('session_id', 'unknown'))
+    if not items:
+        counter.unlink(missing_ok=True)
+        return None
+    signature = hashlib.sha256('\n'.join(items).encode()).hexdigest()
+    try:
+        previous, count = counter.read_text().split()
+        count = int(count) if previous == signature else 0
+    except (OSError, ValueError):
+        count = 0
+    if count >= MAX_IDENTICAL_BLOCKS:
+        return None
+    counter.parent.mkdir(parents=True, exist_ok=True)
+    counter.write_text(f'{signature} {count + 1}')
+    return {'decision': 'block', 'reason': (
+        f'{path} has "done when" items not yet `pass`: {"; ".join(items)}. '
+        'Continue the work; an item becomes `pass` when verify passes it on the real target. '
+        'If you cannot proceed, record the blocker and set `status: blocked`; once every '
+        'item passes, set `status: done`.')}
+
+
+def context(event):
+    path, text = active_effort(event.get('cwd') or os.getcwd())
+    if path is None:
+        return None
+    items = open_items(text)
+    message = (f'Active effort file: {path}. Re-read it now and resume from its Next section. '
+               f'Open items: {"; ".join(items) if items else "none"}.')
+    return {'hookSpecificOutput': {'hookEventName': event.get('hook_event_name', 'SessionStart'),
+                                   'additionalContext': message}}
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in ('stop', 'context'):
+        print(__doc__, file=sys.stderr)
+        return 2
+    event = read_event()
+    output = stop(event) if sys.argv[1] == 'stop' else context(event)
+    if output:
+        print(json.dumps(output))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

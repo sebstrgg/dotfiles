@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python3 ~/dotfiles/bin/effort-gate stop", "timeout": 10}]}
+    ],
+    "SessionStart": [
+      {"matcher": "compact", "hooks": [{"type": "command", "command": "python3 ~/dotfiles/bin/effort-gate context", "timeout": 10}]}
+    ]
+  }
+}

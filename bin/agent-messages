@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Print Sebastian's own messages from local Claude Code and Codex sessions as TSV.
+
+  agent-messages [--days N]
+
+Columns: timestamp, runtime, session file, text (first 300 characters, one line).
+Subagent sidechains, injected context blocks and automated notifications are skipped.
+Reads ~/.claude/projects and ~/.codex/sessions; writes nothing.
+"""
+import argparse
+import json
+import sys
+import time
+from pathlib import Path
+
+AUTOMATED = ('<', 'Caveat:', 'Update on pull request', 'This session is being continued',
+             '[Request interrupted', 'Base directory for this skill')
+
+
+def human(text):
+    text = ' '.join(str(text).split())
+    return text and not text.startswith(AUTOMATED)
+
+
+def claude(path):
+    for line in path.open(errors='replace'):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if record.get('type') != 'user' or record.get('isSidechain'):
+            continue
+        content = record.get('message', {}).get('content')
+        if isinstance(content, str) and human(content):
+            yield record.get('timestamp', ''), content
+
+
+def codex(path):
+    for line in path.open(errors='replace'):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        payload = record.get('payload') or {}
+        # Worker runs (`codex exec`) and subagents carry briefs, not Sebastian's words.
+        source = payload.get('source', '')
+        if record.get('type') == 'session_meta' and (source == 'exec' or 'subagent' in json.dumps(source)):
+            return
+        if record.get('type') != 'response_item' or payload.get('role') != 'user':
+            continue
+        for part in payload.get('content') or []:
+            if part.get('type') == 'input_text' and human(part.get('text', '')):
+                yield record.get('timestamp', ''), part['text']
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--days', type=float, default=7)
+    args = parser.parse_args()
+    since = time.time() - args.days * 86400
+    home = Path.home()
+    sources = [('claude', claude, home / '.claude/projects', '*/*.jsonl'),
+               ('codex', codex, home / '.codex/sessions', '**/*.jsonl')]
+    for runtime, reader, root, pattern in sources:
+        for path in sorted(root.glob(pattern)):
+            if path.stat().st_mtime < since:
+                continue
+            for timestamp, text in reader(path):
+                text = ' '.join(text.split())[:300]
+                sys.stdout.write(f'{timestamp}\t{runtime}\t{path}\t{text}\n')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

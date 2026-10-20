@@ -29,7 +29,21 @@
       "Bash(git remote:*)",
       "Bash(gh:*)"
     ],
-    "defaultMode": "auto"
+    "defaultMode": "auto",
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(gh repo delete:*)",
+      "Bash(gh repo edit:*)",
+      "Bash(gh repo rename:*)",
+      "Bash(gh repo archive:*)",
+      "Bash(docker volume rm:*)",
+      "Bash(docker volume prune:*)",
+      "Bash(docker system prune:*)",
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf ~:*)",
+      "Bash(rm -rf $HOME:*)"
+    ]
   },
   "hooks": {
     "SessionStart": [
@@ -41,6 +55,16 @@
             "command": "test -f ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-track.sh && bash ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-track.sh"
           }
         ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/dotfiles/bin/effort-gate context",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "SessionEnd": [
@@ -50,6 +74,17 @@
           {
             "type": "command",
             "command": "test -f ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-cleanup.sh && bash ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-cleanup.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/dotfiles/bin/effort-gate stop",
+            "timeout": 10
           }
         ]
       }
@@ -109,5 +144,9 @@
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
   "voiceEnabled": true,
-  "autoContinueAtUsageLimit": true
+  "autoContinueAtUsageLimit": true,
+  "autoMemoryEnabled": false,
+  "env": {
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000"
+  }
 }

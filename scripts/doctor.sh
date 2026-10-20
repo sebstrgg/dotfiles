@@ -90,14 +90,15 @@ check_link "nano/.nanorc"              "$HOME/.nanorc"
 check_link "vim/.vimrc"                "$HOME/.vimrc"
 check_link "claude/statusline.sh"      "$HOME/.claude/statusline.sh"
 [[ "$PLATFORM" == "Darwin" ]] && check_link "ghostty/config" "$HOME/.config/ghostty/config"
-for _rule in "$REPO_DIR"/claude/rules/*.md; do
-    [[ -f "$_rule" ]] || continue
-    check_link "claude/rules/$(basename "$_rule")" "$HOME/.claude/rules/$(basename "$_rule")"
-done
-for _skill in engineering-workflow session-handoff; do
+if [[ -f "$REPO_DIR/agents/global-instructions.md" ]]; then
+    check_link "agents/global-instructions.md" "$HOME/.codex/AGENTS.md"
+    check_link "agents/global-instructions.md" "$HOME/.claude/CLAUDE.md"
+fi
+for _skill in engineering-workflow verify continue delegate weekly-review; do
     check_link "agents/skills/$_skill" "$HOME/.claude/skills/$_skill"
     check_link "agents/skills/$_skill" "$HOME/.codex/skills/$_skill"
 done
+check_link "codex/hooks.json"           "$HOME/.codex/hooks.json"
 
 # ── 2. Copied configs (owned/rewritten by an app → not symlinked) ───
 hdr "Copied configs (app-owned)"
@@ -114,6 +115,17 @@ check_copy() {
     fi
 }
 check_copy "claude/settings.json" "$HOME/.claude/settings.json"
+# Codex skips symlinked .rules files, so the tripwires are a copy kept identical.
+_rules="$HOME/.codex/rules/tripwires.rules"
+if [[ -f "$_rules" && ! -L "$_rules" ]] && cmp -s "$REPO_DIR/codex/rules/tripwires.rules" "$_rules"; then
+    ok "$_rules matches"
+elif [[ $FIX -eq 1 ]]; then
+    mkdir -p "$(dirname "$_rules")"
+    rm -f "$_rules"
+    if /bin/cp "$REPO_DIR/codex/rules/tripwires.rules" "$_rules"; then ok "copied: $_rules"; else bad "could not copy $_rules"; fi
+else
+    bad "$_rules: missing, a symlink, or out of date (run --fix)"
+fi
 
 # ── 3. Machine-local rc exists ──────────────────────────────────────
 hdr "Machine-local overrides"

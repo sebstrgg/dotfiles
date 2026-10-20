@@ -1,0 +1,33 @@
+# Tripwires: irreversible or reserved operations that agents never run.
+# Codex loads every *.rules file in ~/.codex/rules; it writes its own approvals
+# to default.rules, so tripwires live here.
+
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f"]],
+    decision = "forbidden",
+    justification = "Force-push rewrites remote history. On your own branch use --force-with-lease.",
+)
+
+prefix_rule(
+    pattern = ["gh", "repo", ["delete", "edit", "rename", "archive"]],
+    decision = "forbidden",
+    justification = "Repository settings, visibility and ownership need Sebastian's approval.",
+)
+
+prefix_rule(
+    pattern = ["docker", "volume", ["rm", "prune"]],
+    decision = "forbidden",
+    justification = "Volumes hold data: removing one needs a verified backup and Sebastian's approval.",
+)
+
+prefix_rule(
+    pattern = ["docker", "system", "prune"],
+    decision = "forbidden",
+    justification = "Prunes data across every project on this machine.",
+)
+
+prefix_rule(
+    pattern = ["rm", ["-rf", "-fr"], ["/", "~"]],
+    decision = "forbidden",
+    justification = "Deletes the filesystem root or home directory.",
+)

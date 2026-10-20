@@ -454,27 +454,34 @@ else
 fi
 
 info "Setting up Claude Code configuration..."
-mkdir -p "$HOME/.claude/rules"
 # settings.json is SEEDED, never symlinked: Claude Code rewrites it atomically
 # (write-to-temp + rename), which silently replaces a symlink with a regular
 # file — so linking it guarantees drift. Seed the baseline; let Claude own it.
 seed_config "$SCRIPT_DIR/claude/settings.json" "$HOME/.claude/settings.json"
 link_config "$SCRIPT_DIR/claude/statusline.sh" "$HOME/.claude/statusline.sh"
 chmod +x "$HOME/.claude/statusline.sh"
-for rule in "$SCRIPT_DIR"/claude/rules/*.md; do
-    [[ -f "$rule" ]] && link_config "$rule" "$HOME/.claude/rules/$(basename "$rule")"
-done
 ok "Claude Code config linked"
 
 # Share workflow skills across local coding agents.
 mkdir -p "$HOME/.claude/skills" "$HOME/.codex/skills"
-for skill in engineering-workflow session-handoff; do
+for skill in engineering-workflow verify continue delegate weekly-review; do
     link_config "$SCRIPT_DIR/agents/skills/$skill" "$HOME/.claude/skills/$skill"
     link_config "$SCRIPT_DIR/agents/skills/$skill" "$HOME/.codex/skills/$skill"
 done
-if ! grep -q 'engineering-workflow/SKILL.md' "$HOME/.codex/AGENTS.md" 2>/dev/null; then
-    printf '\nFor planning, design decisions, specs, tickets, implementation, debugging, research, review, or handoffs, read ~/.codex/skills/engineering-workflow/SKILL.md at intake and phase changes. Select applicable Matt Pocock playbooks automatically; slash commands are optional. Small, settled work stays direct.\n' >> "$HOME/.codex/AGENTS.md"
+# The shared policy is private (gitignored); a public clone has no copy to link.
+if [[ -f "$SCRIPT_DIR/agents/global-instructions.md" ]]; then
+    link_config "$SCRIPT_DIR/agents/global-instructions.md" "$HOME/.codex/AGENTS.md"
+    link_config "$SCRIPT_DIR/agents/global-instructions.md" "$HOME/.claude/CLAUDE.md"
+else
+    warn "Private policy absent: restore agents/global-instructions.md, then re-run"
 fi
+# Codex hooks (effort gate) and tripwire rules. New hooks need trusting once in
+# Codex via /hooks. The rules file is copied: Codex skips symlinked .rules files,
+# and writes its own approvals to rules/default.rules.
+mkdir -p "$HOME/.codex/rules"
+link_config "$SCRIPT_DIR/codex/hooks.json" "$HOME/.codex/hooks.json"
+/bin/cp -f "$SCRIPT_DIR/codex/rules/tripwires.rules" "$HOME/.codex/rules/tripwires.rules"
+ok "Codex tripwire rules copied"
 
 # Launch agents: Claude usage-window keeper, development disk trim, and
 # Bitwarden bridge expiry. Copied, not symlinked: launchd does not reliably
