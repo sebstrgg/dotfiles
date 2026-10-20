@@ -7,10 +7,13 @@
 
 An effort file is `.scratch/<effort>/effort.md` with front matter `status: active`
 and `checkout:` equal to this checkout. Copies in other worktrees never match.
+After MAX_IDENTICAL_BLOCKS stops without progress the gate stops blocking: it
+marks the effort `blocked`, records why under "## Blockers" and warns the user.
 """
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -93,6 +96,20 @@ def counter_path(session_id):
     return Path(tempfile.gettempdir()) / 'effort-gate' / name
 
 
+def mark_blocked(path, text, items):
+    """Set `status: blocked` and record the stall, so the effort reads as stuck."""
+    note = (f'- The agent stopped {MAX_IDENTICAL_BLOCKS} times without progress on: '
+            f'{"; ".join(items)}. Needs a new approach or Sebastian.')
+    text = re.sub(r'^status:[ \t]*active[ \t]*$', 'status: blocked', text, count=1, flags=re.MULTILINE)
+    heading = re.search(r'^## Blockers[ \t]*\n', text, flags=re.MULTILINE)
+    if heading:
+        rest = re.sub(r'^\s*None\.[ \t]*\n', '', text[heading.end():], count=1)
+        text = f'{text[:heading.end()]}\n{note}\n{rest}'
+    else:
+        text = f'{text.rstrip()}\n\n## Blockers\n\n{note}\n'
+    path.write_text(text)
+
+
 def stop(event):
     path, text = active_effort(event.get('cwd') or os.getcwd())
     if path is None:
@@ -109,7 +126,11 @@ def stop(event):
     except (OSError, ValueError):
         count = 0
     if count >= MAX_IDENTICAL_BLOCKS:
-        return None
+        mark_blocked(path, text, items)
+        counter.unlink(missing_ok=True)
+        return {'systemMessage': (
+            f'Effort gate: the agent stopped {MAX_IDENTICAL_BLOCKS} times without progress. '
+            f'{path} is now marked blocked; still open: {"; ".join(items)}.')}
     counter.parent.mkdir(parents=True, exist_ok=True)
     counter.write_text(f'{signature} {count + 1}')
     return {'decision': 'block', 'reason': (

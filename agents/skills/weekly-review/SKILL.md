@@ -12,7 +12,10 @@ Budget: about 20 minutes. Report only what is new or needs Sebastian.
 
 ## 1. Where Sebastian's attention went
 
-Run `~/dotfiles/bin/agent-messages --days 7`. Classify each message:
+Run `~/dotfiles/bin/agent-messages --days 7`. Headless and delegated runs
+started from a T3 session are recorded like Sebastian's own messages, so first
+drop prompts an agent wrote (briefs, structured task prompts, test prompts).
+Classify each remaining message:
 
 - **Valuable**: direction, priorities, taste, a genuine decision, new information.
 - **Avoidable**: approving the agent's own recommendation, "continue" or

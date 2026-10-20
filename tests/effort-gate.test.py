@@ -23,6 +23,10 @@ checkout: {checkout}
 | 1 | Login works | real browser | {first} | |
 | 2 | Logout works | real browser | pass | screenshot |
 
+## Blockers
+
+None.
+
 ## Next
 
 Keep going.
@@ -87,11 +91,18 @@ class EffortGate(unittest.TestCase):
         self.write_effort(checkout='/somewhere/else')
         self.assertIsNone(self.run_gate('stop'))
 
-    def test_repeated_blocks_without_progress_are_capped(self):
-        self.write_effort()
+    def test_stall_marks_effort_blocked_and_warns(self):
+        path = self.write_effort()
         outputs = [self.run_gate('stop') for _ in range(6)]
         self.assertTrue(all(o and o['decision'] == 'block' for o in outputs[:5]))
-        self.assertIsNone(outputs[5])
+        self.assertNotIn('decision', outputs[5])
+        self.assertIn('marked blocked', outputs[5]['systemMessage'])
+        text = path.read_text()
+        self.assertIn('status: blocked', text)
+        self.assertIn('without progress on: #1 Login works', text)
+        self.assertNotIn('None.', text)
+        self.assertIn('## Next', text)
+        self.assertIsNone(self.run_gate('stop'))
 
     def test_progress_resets_the_cap(self):
         path = self.write_effort()

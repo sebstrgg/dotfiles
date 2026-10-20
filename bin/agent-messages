@@ -4,7 +4,9 @@
   agent-messages [--days N]
 
 Columns: timestamp, runtime, session file, text (first 300 characters, one line).
-Subagent sidechains, injected context blocks and automated notifications are skipped.
+Subagent sidechains, injected context blocks, automated notifications and
+`codex exec` workers are skipped. Headless Claude runs started from a T3 session
+carry the same metadata as T3 messages and are not separable here.
 Reads ~/.claude/projects and ~/.codex/sessions; writes nothing.
 """
 import argparse
