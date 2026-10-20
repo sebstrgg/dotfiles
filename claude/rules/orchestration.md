@@ -38,10 +38,6 @@ Claude Code specifics for the shared multi-agent rules in the global instruction
   started detached in its own process session (`setsid`, e.g. via Python on macOS) so it
   survives the Claude session. Resume a run with `codex exec resume <thread>`. Wait for
   the exit marker with one Monitor, never a sleep loop.
-- A Codex worker launched by a Claude orchestrator is a worker, not an orchestrator: its
-  brief forbids invoking `claude` or any other agent for reviews or delegation, and the
-  launch blocks the `claude` CLI (a `ZDOTDIR` whose profiles put an exit-126 `claude`
-  first on `PATH`). The orchestrator owns every review.
 - Reviews and probes: read-only sandbox. Full access only when the task needs Docker or
   network, never for reviews.
 - A shared brief file plus a short per-task prompt; give context pointers, not copies.
