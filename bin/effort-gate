@@ -24,11 +24,12 @@ toward the cap too, so a stale `running` row ends in `blocked` rather than holdi
 or freeing the session forever; any change to an item or task row is progress.
 
 When the owner ends a turn on a finished effort (status `done` or `blocked`, or
-every item passed) whose brief still lists reserved actions under "Not approved",
-and its last message asks nothing, the gate holds it once to ask each one as a
-yes/no question. A marker beside the effort file keeps it to once per owner and
-list.
+every item passed with nothing running) whose brief still lists reserved actions
+under "Not approved", and its last message asks nothing, the gate holds it once
+to ask each one as a yes/no question. A marker beside the effort file keeps it to
+once per owner and list.
 """
+import contextlib
 import hashlib
 import json
 import os
@@ -149,21 +150,27 @@ def active_effort(cwd, session_id):
 
 
 NOT_APPROVED = re.compile(r'\s*(?:- )?\*\*not approved:?\*\*:?(.*)', re.IGNORECASE)
+LIST_ITEM = re.compile(r'\s*(?:[-*+]|\d+[.)])\s')
+# The template's prompt before it named the follow-ups; older effort files keep it.
+EARLIER_PLACEHOLDERS = {'reserved actions that are still open.'}
 
 
 def not_approved_text(text):
-    """The brief's "Not approved" paragraph or list, as one line."""
+    """The brief's "Not approved" paragraph or list, as one line. It runs to the
+    next field or heading; a blank line ends it unless a list item follows."""
     lines = text.splitlines()
     for index, line in enumerate(lines):
         label = NOT_APPROVED.match(line)
         if not label:
             continue
         parts, rest = [label.group(1).strip()], lines[index + 1:]
-        if not parts[0]:
-            while rest and not rest[0].strip():
-                rest = rest[1:]
-        for following in rest:
-            if not following.strip() or following.lstrip().startswith(('**', '#')):
+        for position, following in enumerate(rest):
+            if not following.strip():
+                upcoming = next((line for line in rest[position + 1:] if line.strip()), '')
+                if LIST_ITEM.match(upcoming) or not any(parts):
+                    continue
+                break
+            if following.lstrip().startswith(('**', '#')):
                 break
             parts.append(following.strip())
         return ' '.join(part for part in parts if part)
@@ -171,23 +178,34 @@ def not_approved_text(text):
 
 
 def reserved_actions(text):
-    """The reserved actions the brief leaves open; '' for none or the template's prompt."""
+    """The reserved actions the brief leaves open; '' for none or a template prompt."""
     listed = not_approved_text(text)
-    try:
-        placeholder = not_approved_text(TEMPLATE.read_text())
-    except OSError:
-        placeholder = None
-    if not listed or listed == placeholder or re.match(r'none\b', listed, re.IGNORECASE):
+    placeholders = set(EARLIER_PLACEHOLDERS)
+    with contextlib.suppress(OSError):
+        placeholders.add(not_approved_text(TEMPLATE.read_text()))
+    if listed in placeholders or listed.strip('`*_ .').lower() in ('', 'none', 'nothing'):
         return ''
     return listed
 
 
 def asks(message):
-    """Whether a message ends asking something: a `?` in one of its last lines."""
+    """Whether a message ends asking something: a `?` in one of its last lines,
+    outside links and code."""
     if not isinstance(message, str):
         return False
-    lines = [line for line in message.splitlines() if line.strip()]
+    lines = [re.sub(r'`[^`]*`|\S+://\S+', '', line) for line in message.splitlines()
+             if line.strip()]
     return any('?' in line for line in lines[-5:])
+
+
+def closing(text, status):
+    """Whether the effort is at its close: `done` or `blocked`, or every item passed
+    with nothing running."""
+    if status in ('done', 'blocked'):
+        return True
+    rows = table(text, 'done when')
+    return (bool(rows) and not running_tasks(text)
+            and all(row.get('status', '').strip('`* ').lower() == 'pass' for row in rows))
 
 
 def own_session_id():
@@ -277,15 +295,18 @@ def mark_blocked(path, text, items):
 def stop(event, runtime=None):
     session_id = str(event.get('session_id', ''))
     efforts = owned_efforts(event.get('cwd') or os.getcwd(), session_id)
+    if not efforts:
+        return None
     for path, text, status in efforts:
         items = open_items(text) if status in GATED else []
         if items:
             return hold(path, text, items, session_id, runtime)
-    counter_path(session_id).unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        counter_path(session_id).unlink(missing_ok=True)
     if asks(event.get('last_assistant_message')):
         return None
-    for path, text, _ in efforts:
-        reserved = reserved_actions(text)
+    for path, text, status in efforts:
+        reserved = reserved_actions(text) if closing(text, status) else ''
         if reserved and first_close_question(path, session_id, reserved):
             return {'decision': 'block', 'reason': (
                 f'{path} lists reserved actions under "Not approved": {reserved.rstrip(".")}. '
@@ -296,15 +317,19 @@ def stop(event, runtime=None):
 
 
 def first_close_question(path, session_id, reserved):
-    """Record the close question for this owner and list; False if already asked."""
+    """Record the close question for this owner and list; False if already asked,
+    or if it cannot be recorded, since an unrecorded question would repeat."""
     marker = path.parent / '.close-question'
     signature = hashlib.sha256(f'{session_id}\n{reserved}'.encode()).hexdigest()
     try:
-        if marker.read_text().strip() == signature:
+        if marker.read_text(errors='replace').strip() == signature:
             return False
     except OSError:
         pass
-    marker.write_text(f'{signature}\n')
+    try:
+        marker.write_text(f'{signature}\n')
+    except OSError:
+        return False
     return True
 
 

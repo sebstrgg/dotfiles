@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Behaviour of bin/effort-gate through its hook interface."""
+import hashlib
 import json
 import os
 import shlex
@@ -228,6 +229,53 @@ class EffortGate(unittest.TestCase):
         path.write_text(path.read_text().replace('status: active', 'status: done')
                         .replace('| open |', '| pass |'))
         self.assertIsNone(self.run_gate('stop', last='Done.'))
+
+    def test_waiting_on_blocked_items_is_not_a_close(self):
+        self.write_effort(first='blocked', task='| Export | Bash | bg-1 | main | running |',
+                          not_approved='Going public.')
+        self.assertIsNone(self.run_gate('stop', runtime='claude', last='Waiting for the export.'))
+
+    def test_list_items_separated_by_blank_lines_are_all_read(self):
+        path = self.write_effort(status='done', first='pass')
+        path.write_text(path.read_text().replace(
+            '**Not approved:** None.',
+            '**Not approved:**\n\n- Going public\n\n- Rotating the key\n\n**Budget:** today'))
+        reason = self.run_gate('stop', last='Done.')['reason']
+        self.assertIn('Rotating the key', reason)
+        self.assertNotIn('today', reason)
+
+    def test_text_after_none_is_still_a_reserved_action(self):
+        self.write_effort(status='done', first='pass', not_approved='None yet: publishing to PyPI.')
+        self.assertIn('publishing to PyPI', self.run_gate('stop', last='Done.')['reason'])
+
+    def test_earlier_template_prompt_is_not_a_reserved_action(self):
+        for not_approved in ('reserved actions that are still open.', '`None.`'):
+            self.session = str(uuid.uuid4())
+            self.write_effort(status='done', first='pass', not_approved=not_approved)
+            self.assertIsNone(self.run_gate('stop', last='Done.'), not_approved)
+
+    def test_question_mark_in_a_link_or_code_is_not_a_question(self):
+        for last in ('Done. Preview: https://example.test/report?view=full',
+                     'Done. Run `test -n "$x" || echo unset?` to check.'):
+            self.session = str(uuid.uuid4())
+            self.write_effort(status='done', first='pass', not_approved='Going public.')
+            self.assertEqual(self.run_gate('stop', last=last)['decision'], 'block', last)
+
+    def test_unwritable_close_marker_lets_the_stop_through(self):
+        path = self.write_effort(status='done', first='pass', not_approved='Going public.')
+        (path.parent / '.close-question').mkdir()
+        self.assertIsNone(self.run_gate('stop', last='Done.'))
+
+    def test_unusable_stall_counter_never_breaks_a_stop(self):
+        name = hashlib.sha256(self.session.encode()).hexdigest()[:16]
+        counter = Path(tempfile.gettempdir()) / 'effort-gate' / name
+        counter.mkdir(parents=True)
+        try:
+            self.assertIsNone(self.run_gate('stop'))
+            self.write_effort(first='pass')
+            self.assertIsNone(self.run_gate('stop'))
+        finally:
+            counter.rmdir()
 
     def test_waiting_mid_effort_is_not_a_close(self):
         self.write_effort(task='| Export | Bash | bg-1 | main | running |',
