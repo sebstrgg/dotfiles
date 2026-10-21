@@ -4,6 +4,10 @@
   agent-run start <codex|claude> <role> <run-dir> [--model M] [--effort E]
       Run the agent on <run-dir>/prompt.md in the current directory, in its own
       process session, and return at once.
+  agent-run resume <run-dir> <new-run-dir>
+      Resume the finished or stopped run's agent session with
+      <new-run-dir>/prompt.md as the next message, keeping its runtime, role,
+      model, effort and access.
   agent-run wait <run-dir>
       Block until that run exits, print its session handle and last message,
       and exit with its exit code.
@@ -23,7 +27,8 @@ permission mode; verify and review runs have no edit tools.
 
 Runs other than `continue` carry AGENT_RUN_ROLE=<role>: they work their brief
 for the orchestrator, so `effort-gate` neither gates them nor lets them create
-or claim an effort file, and `agent-run start` refuses to start a run from one.
+or claim an effort file, and `agent-run` refuses to start or resume a run from
+one.
 
 The run folder receives command.json (what ran, for the record), events.jsonl,
 stderr.log, last.md and, when the agent exits, `exit` holding its exit code.
@@ -49,13 +54,21 @@ def default_effort(runtime, role):
     return 'xhigh' if runtime == 'codex' and role == 'review' else 'high'
 
 
-def command(runtime, role, model, effort, run_dir):
+def command(runtime, role, model, effort, run_dir, session=None):
+    """The agent's command line; `session` resumes that agent session."""
     if runtime == 'codex':
         sandbox = 'read-only' if role == 'review' else 'danger-full-access'
-        return ['codex', 'exec', '--json', '-m', model, '-c', f'model_reasoning_effort={effort}',
-                '-s', sandbox, '-o', str(run_dir / 'last.md'), '-']
+        pins = ['--json', '-m', model, '-c', f'model_reasoning_effort={effort}']
+        last = ['-o', str(run_dir / 'last.md')]
+        if session:
+            # `exec resume` takes no -s; the sandbox goes in as configuration.
+            return ['codex', 'exec', 'resume', *pins, '-c', f'sandbox_mode={sandbox}', *last,
+                    session, '-']
+        return ['codex', 'exec', *pins, '-s', sandbox, *last, '-']
     argv = ['claude', '-p', '--model', model, '--effort', effort,
             '--output-format', 'stream-json', '--verbose']
+    if session:
+        argv += ['--resume', session]
     if role in REPORT_ONLY:
         argv += ['--disallowedTools', 'Edit', 'Write', 'NotebookEdit']
     return argv
@@ -76,21 +89,53 @@ def environment(runtime, role, run_dir):
     return env
 
 
-def start(args):
+def refuse_delegated():
     if os.environ.get('AGENT_RUN_ROLE'):
         sys.exit(f'agent-run: this is a delegated {os.environ["AGENT_RUN_ROLE"]} run '
                  '(AGENT_RUN_ROLE). Further runs are the orchestrator\'s decision: name what '
                  'you need in your report.')
-    run_dir = Path(args.run_dir).expanduser().resolve()
+
+
+def prompted(run_dir):
+    run_dir = Path(run_dir).expanduser().resolve()
     if not (run_dir / 'prompt.md').is_file():
         sys.exit(f'agent-run: {run_dir / "prompt.md"} is missing; write the prompt there first')
+    return run_dir
+
+
+def start(args):
+    refuse_delegated()
+    run_dir = prompted(args.run_dir)
     model = args.model or MODELS[args.runtime]
     effort = args.effort or default_effort(args.runtime, args.role)
-    argv = command(args.runtime, args.role, model, effort, run_dir)
+    return launch(run_dir, {'runtime': args.runtime, 'role': args.role, 'model': model,
+                            'effort': effort, 'cwd': os.getcwd()})
+
+
+def resume(args):
+    refuse_delegated()
+    earlier = Path(args.run_dir).expanduser().resolve()
+    try:
+        record = json.loads((earlier / 'command.json').read_text())
+    except (OSError, ValueError):
+        sys.exit(f'agent-run: {earlier} has no run record')
+    if not (earlier / 'exit').exists():
+        sys.exit(f'agent-run: the run in {earlier} is still running; wait for it or stop it first')
+    session = session_id(earlier / 'events.jsonl')
+    if session is None:
+        sys.exit(f'agent-run: {earlier} recorded no session to resume')
+    run_dir = prompted(args.new_run_dir)
+    fields = {key: record[key] for key in ('runtime', 'role', 'model', 'effort', 'cwd')}
+    return launch(run_dir, {**fields, 'resumes': str(earlier)}, session)
+
+
+def launch(run_dir, record, session=None):
+    """Record the run in <run_dir>/command.json and start its supervisor detached."""
+    runtime, role = record['runtime'], record['role']
+    argv = command(runtime, role, record['model'], record['effort'], run_dir, session)
     if shutil.which(argv[0]) is None:
         sys.exit(f'agent-run: {argv[0]} is not on PATH')
-    record = {'runtime': args.runtime, 'role': args.role, 'model': model, 'effort': effort,
-              'cwd': os.getcwd(), 'argv': argv, 'started': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
+    record = {**record, 'argv': argv, 'started': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
     try:
         with (run_dir / 'command.json').open('x') as claimed:
             claimed.write(json.dumps(record, indent=2) + '\n')
@@ -98,10 +143,11 @@ def start(args):
         sys.exit(f'agent-run: {run_dir} was already used by a run; give each run its own folder')
     supervisor = subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), '_supervise', str(run_dir)],
-        env=environment(args.runtime, args.role, run_dir), start_new_session=True,
+        env=environment(runtime, role, run_dir), start_new_session=True,
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     (run_dir / 'pid').write_text(f'{supervisor.pid}\n')
-    print(f'Started {args.runtime} {args.role} ({model}, {effort}) in {run_dir}.\n'
+    verb = 'Resumed' if session else 'Started'
+    print(f'{verb} {runtime} {role} ({record["model"]}, {record["effort"]}) in {run_dir}.\n'
           f'Wait with: {Path(__file__).resolve()} wait {run_dir}')
     return 0
 
@@ -157,12 +203,20 @@ def claude_result(path):
     return results[-1] if results and isinstance(results[-1], str) else None
 
 
+def session_id(path):
+    """The Codex thread or Claude session a run's events record, or None."""
+    for event in events(path):
+        if event.get('thread_id') or event.get('session_id'):
+            return event.get('thread_id') or event.get('session_id')
+    return None
+
+
 def session_handle(path):
     for event in events(path):
         if event.get('thread_id'):
-            return f'Codex thread {event["thread_id"]} (codex exec resume <thread>)'
+            return f'Codex thread {event["thread_id"]} (agent-run resume <run-dir> <new-run-dir>)'
         if event.get('session_id'):
-            return f'Claude session {event["session_id"]} (claude -p --resume <session>)'
+            return f'Claude session {event["session_id"]} (agent-run resume <run-dir> <new-run-dir>)'
     return 'no session handle recorded'
 
 
@@ -191,7 +245,7 @@ def wait(args):
     print(f'Exit {code}. {session_handle(run_dir / "events.jsonl")}.')
     last = run_dir / 'last.md'
     if last.exists():
-        print(last.read_text(), end='')
+        print(last.read_text().rstrip('\n'))
     else:
         print('No last message. End of stderr.log:')
         print('\n'.join((run_dir / 'stderr.log').read_text().splitlines()[-20:]))
@@ -210,10 +264,13 @@ def main():
     started.add_argument('run_dir')
     started.add_argument('--model')
     started.add_argument('--effort')
+    resumed = commands.add_parser('resume', help="resume an earlier run's agent session")
+    resumed.add_argument('run_dir')
+    resumed.add_argument('new_run_dir')
     waited = commands.add_parser('wait', help='wait for a run and print its result')
     waited.add_argument('run_dir')
     args = parser.parse_args()
-    return start(args) if args.command == 'start' else wait(args)
+    return {'start': start, 'resume': resume, 'wait': wait}[args.command](args)
 
 
 if __name__ == '__main__':

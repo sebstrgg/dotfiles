@@ -22,6 +22,9 @@
 - Rewrite with `git filter-repo`, push with `--force-with-lease`, and keep the
   pre-rewrite backup (a bundle) in `.scratch/<effort>/`: out of git, and
   removed with the effort. The report names it, and asks to rotate the secret.
+- The agent's own session record (`~/.claude/projects`, `~/.codex/sessions`)
+  keeps the earlier content of every file it edits: the report names it among
+  the places the secret remains.
 
 ## Shared areas
 

@@ -103,9 +103,12 @@ diagnosis Sol couldn't crack, and cross-family review.
   only a `continue` run keeps Claude reachable.
 - Run folders live under `.scratch/<effort>/runs/`, never `/tmp`: a restart
   wipes `/tmp` and the work with it.
-- A run stopped by a usage limit: schedule a wake-up for the reset time and
-  resume it (`codex exec resume <thread>`, `claude -p --resume <session>`).
-- From Claude, the `codex` plugin (`/codex:review`,
-  `/codex:adversarial-review`, `codex:codex-rescue`) also works. An unfinished
-  job is a clean-up obligation.
+- A run that stopped (a usage limit, a capacity error) or needs a follow-up
+  turn: `agent-run resume <run-dir> <new-run-dir>`, with the next message in
+  `<new-run-dir>/prompt.md`, continues the same agent session with its role,
+  pins and access. After a usage limit, schedule a wake-up for the reset time
+  first.
+- From Claude, the `codex` plugin's `/codex:review` and
+  `/codex:adversarial-review` also work for reviews. An unfinished job is a
+  clean-up obligation.
 - Use one shared brief file plus a short per-task prompt.

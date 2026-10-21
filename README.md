@@ -205,9 +205,11 @@ machine. Start a new agent session after installation.
 - **Cross-runtime runs.** [`bin/agent-run`](bin/agent-run) starts a detached
   `codex exec` or `claude -p` run for a role (`work`, `continue`, `verify`,
   `review`) with model, effort and access pinned, the prompt and results in a
-  run folder, and `wait` blocks until it ends. Codex lanes start signed out of
-  Claude. Runs other than `continue` carry `AGENT_RUN_ROLE` and cannot start
-  further runs. Tests: `python3 tests/agent-run.test.py`.
+  run folder, `wait` blocks until it ends, and `resume` continues a finished
+  or stopped run's session in a new run folder with the same pins. Codex
+  lanes start signed out of Claude. Runs other than `continue` carry
+  `AGENT_RUN_ROLE` and cannot start or resume further runs. Tests:
+  `python3 tests/agent-run.test.py`.
 - **Tripwires.** [`bin/agent-tripwire`](bin/agent-tripwire), a PreToolUse hook
   in both runtimes, refuses `git push` with `--force`, `-f` or a `+refspec`
   wherever the flag sits; `--force-with-lease` stays allowed. Alongside it,

@@ -183,6 +183,59 @@ class AgentRun(unittest.TestCase):
         self.assertIn('orchestrator', refused.stderr)
         self.assertFalse((self.run_dir / 'command.json').exists())
 
+    def next_run(self, name):
+        run_dir = self.run_dir.parent / name
+        run_dir.mkdir()
+        (run_dir / 'prompt.md').write_text('Carry on.\n')
+        return run_dir
+
+    def test_resume_continues_the_recorded_codex_thread_with_the_same_pins(self):
+        self.start_and_wait('codex', 'verify', '--effort', 'xhigh')
+        resumed = self.next_run('verify-2')
+        self.agent_run('resume', str(self.run_dir), str(resumed))
+        waited = self.agent_run('wait', str(resumed), check=False)
+        self.assertEqual(waited.returncode, 0, waited.stderr)
+        seen = json.loads(self.log.read_text())
+        argv = seen['argv']
+        self.assertEqual(argv[:4], ['exec', 'resume', '--json', '-m'])
+        self.assertEqual(argv[argv.index('-m') + 1], 'gpt-6.1-sol')
+        self.assertIn('model_reasoning_effort=xhigh', argv)
+        self.assertIn('sandbox_mode=danger-full-access', argv)
+        self.assertEqual(argv[-2:], ['thread-1', '-'])
+        self.assertEqual(seen['stdin'], 'Carry on.\n')
+        self.assertEqual(seen['agent_run_role'], 'verify')
+        self.assertEqual(list(Path(seen['claude_config_dir']).iterdir()), [])
+        record = json.loads((resumed / 'command.json').read_text())
+        self.assertEqual((record['role'], record['resumes']), ('verify', str(self.run_dir)))
+
+    def test_resume_continues_the_recorded_claude_session_with_the_same_pins(self):
+        self.start_and_wait('claude', 'review')
+        resumed = self.next_run('review-2')
+        self.agent_run('resume', str(self.run_dir), str(resumed))
+        self.agent_run('wait', str(resumed))
+        argv = json.loads(self.log.read_text())['argv']
+        self.assertEqual(argv[argv.index('--resume') + 1], 'session-1')
+        self.assertEqual(argv[argv.index('--model') + 1], 'opus')
+        self.assertIn('--disallowedTools', argv)
+
+    def test_resume_refuses_a_run_still_going_or_without_a_session(self):
+        self.agent_run('start', 'codex', 'work', str(self.run_dir), FAKE_SLEEP='3')
+        early = self.agent_run('resume', str(self.run_dir), str(self.next_run('work-2')), check=False)
+        self.assertNotEqual(early.returncode, 0)
+        self.assertIn('still running', early.stderr)
+        self.agent_run('wait', str(self.run_dir))
+        (self.run_dir / 'events.jsonl').write_text('')
+        empty = self.agent_run('resume', str(self.run_dir), str(self.next_run('work-3')), check=False)
+        self.assertNotEqual(empty.returncode, 0)
+        self.assertIn('no session', empty.stderr)
+
+    def test_a_delegated_run_cannot_resume_another(self):
+        self.start_and_wait('codex', 'work')
+        refused = self.agent_run('resume', str(self.run_dir), str(self.next_run('work-2')),
+                                 check=False, AGENT_RUN_ROLE='work')
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('orchestrator', refused.stderr)
+
     def test_refuses_a_run_folder_without_prompt_or_already_used(self):
         (self.run_dir / 'prompt.md').unlink()
         missing = self.agent_run('start', 'codex', 'verify', str(self.run_dir), check=False)
