@@ -18,16 +18,16 @@ unless a change is requested.
   continuing it): run `~/dotfiles/bin/effort-gate claim <file>` and continue
   from its next step. A delegated agent works its brief and leaves the file to
   its owner.
-- Scale to the risk. Skip the effort file, planning and the fresh verifier
-  only when all of these hold: the change finishes in this sitting, no part of
-  the request awaits Sebastian's approval or decision, no data is persisted or
-  migrated, and one revert undoes it. Then make it, check it once on the real
+- A quick change (global instructions, "How work runs") skips the effort
+  file, planning and the fresh verifier: make it, check it once on the real
   target and report the evidence.
 - Otherwise create the effort file with
-  `~/dotfiles/bin/effort-gate new <effort>`: it copies
-  [the template](templates/effort.md) to `.scratch/<effort>/effort.md`, records
-  this checkout and session as its owner and gitignores `.scratch/`. Then fill
-  it in.
+  `~/dotfiles/bin/effort-gate new <effort>`, the agent setup's own tool, which
+  writes only inside this checkout. It copies
+  [the template](templates/effort.md) to `.scratch/<effort>/effort.md`,
+  records this checkout and session as its owner and gitignores `.scratch/`.
+  Then fill it in, keeping the template's structure: the stop gate and
+  compaction hook read only files it created or claimed.
 - A clear request is the approved brief. Otherwise ask once: numbered questions,
   each with your recommendation. For a new project, or a big feature with
   unsettled intent, run `grilling` until the brief's "done when" list is

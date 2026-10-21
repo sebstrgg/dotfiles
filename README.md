@@ -181,14 +181,16 @@ machine. Start a new agent session after installation.
   [`weekly-review`](agents/skills/weekly-review/SKILL.md) is run on a weekly
   schedule.
 - **Effort files.** Work state lives in `.scratch/<effort>/effort.md` in the
-  project (gitignored), from
-  [the template](agents/skills/engineering-workflow/templates/effort.md).
-  [`bin/effort-gate`](bin/effort-gate) keeps the owning session (front matter
-  `session:`) from ending its turn while that file has unfinished "done when"
-  items, and points it back at the file after context compaction. Verifiers
-  and workers in the same checkout are not gated. It runs as the Stop and post-compaction
-  hook in both runtimes (`claude/settings.json`, `codex/hooks.json`; Codex asks
-  once to trust new hooks via `/hooks`). Tests: `python3 tests/effort-gate.test.py`.
+  project (gitignored). [`bin/effort-gate`](bin/effort-gate) `new <effort>`
+  creates one from
+  [the template](agents/skills/engineering-workflow/templates/effort.md), owned
+  by the calling agent session (front matter `session:`); `claim <file>` hands
+  it to another session. As the Stop hook it keeps the owner from ending its
+  turn while the file has unfinished "done when" items; as the post-compaction
+  hook it points the owner back at the file. Verifiers and workers in the same
+  checkout are not gated. Hooks: `claude/settings.json`, `codex/hooks.json`
+  (Codex asks once to trust new hooks via `/hooks`). Tests:
+  `python3 tests/effort-gate.test.py`.
 - **Tripwires.** `claude/settings.json` denies, and
   [`codex/rules/tripwires.rules`](codex/rules/tripwires.rules) forbids,
   force-push, repository deletion and settings changes, Docker volume removal
