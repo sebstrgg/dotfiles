@@ -36,7 +36,16 @@ class AgentTripwire(unittest.TestCase):
                         'git status; git push origin main --force',
                         'git fetch\ngit push --force origin main',
                         'FOO=1 git push --force',
-                        'timeout 30 git push --force'):
+                        'timeout 30 git push --force',
+                        'git push \\\n  --force origin main',
+                        'git push -4f origin main',
+                        'git push -f4 origin main',
+                        'git push --mirror origin',
+                        'command -- git push -f origin main',
+                        'if true; then git push --force origin main; fi',
+                        'for r in a b; do git push -f "$r" main; done',
+                        'git status # check first\ngit push --force origin main',
+                        "cat <<'EOF' > notes.txt\nit's fine\nEOF\ngit push --force origin main"):
             self.assertEqual(decide(command), 'deny', command)
 
     def test_ordinary_and_lease_protected_pushes_are_allowed(self):
@@ -48,6 +57,11 @@ class AgentTripwire(unittest.TestCase):
                         'git push --force-if-includes --force-with-lease origin main',
                         'git push origin v1.0.0',
                         'git push -o ci.skip origin main',
+                        'git push -ofast origin main',
+                        'git push origin main -o +ci.skip',
+                        'git push --push-option +x origin main',
+                        'git push origin main  # never --force here',
+                        "git commit -F - <<'EOF'\nExplain why\ngit push --force was wrong\nEOF",
                         'git log --format=%s -f',
                         'echo "never git push --force"',
                         'git commit -m "explain why --force is wrong"'):

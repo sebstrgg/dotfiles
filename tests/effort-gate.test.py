@@ -112,6 +112,14 @@ class EffortGate(unittest.TestCase):
         path.write_text(path.read_text().replace('| running |', '| running, 80% |'))
         self.assertEqual(self.run_gate('stop')['decision'], 'block')
 
+    def test_new_evidence_on_an_open_item_counts_as_progress(self):
+        path = self.write_effort()
+        for _ in range(5):
+            self.run_gate('stop')
+        path.write_text(path.read_text().replace('| open |  |', '| open | first check ran |'))
+        self.assertEqual(self.run_gate('stop')['decision'], 'block')
+        self.assertIn('status: active', path.read_text())
+
     def test_finished_task_does_not_count_as_running(self):
         self.write_effort(task='| Export | Bash | bg-1 | main | finished |')
         self.assertEqual(self.run_gate('stop', runtime='claude')['decision'], 'block')
@@ -132,6 +140,10 @@ class EffortGate(unittest.TestCase):
         self.assertEqual(output['decision'], 'block')
         self.assertIn('#1 Login works (substitute evidence)', output['reason'])
         self.assertIn('substitute check never makes an item `pass`', output['reason'])
+
+    def test_escaped_pipe_in_evidence_keeps_the_substitute_label(self):
+        self.write_effort(first='pass', evidence='curl -s host \\| grep ok (substitute: staging)')
+        self.assertIn('(substitute evidence)', self.run_gate('stop')['reason'])
 
     def test_blocked_item_with_substitute_evidence_allows_stop(self):
         self.write_effort(first='blocked', evidence='substitute only; needs the live API key')

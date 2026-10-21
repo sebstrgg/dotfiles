@@ -2,6 +2,7 @@
 """Behaviour of bin/agent-run against stand-in `codex` and `claude` executables."""
 import json
 import os
+import signal
 import subprocess
 import tempfile
 import time
@@ -16,11 +17,16 @@ AGENT_RUN = Path(__file__).resolve().parents[1] / 'bin' / 'agent-run'
 # real one puts it.
 FAKE = r'''#!/usr/bin/env python3
 import json, os, sys, time
+if os.environ.get('FAKE_PID'):
+    with open(os.environ['FAKE_PID'], 'w') as pid:
+        pid.write(str(os.getpid()))
 time.sleep(float(os.environ.get('FAKE_SLEEP', '0')))
 prompt = sys.stdin.read()
 record = {'argv': sys.argv[1:], 'cwd': os.getcwd(), 'stdin': prompt,
           'claude_config_dir': os.environ.get('CLAUDE_CONFIG_DIR'),
-          'anthropic_api_key': 'ANTHROPIC_API_KEY' in os.environ}
+          'anthropic_api_key': 'ANTHROPIC_API_KEY' in os.environ,
+          'claude_tokens': [name for name in ('ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN')
+                            if name in os.environ]}
 with open(os.environ['FAKE_LOG'], 'w') as log:
     json.dump(record, log)
 if os.path.basename(sys.argv[0]) == 'codex':
@@ -52,6 +58,7 @@ class AgentRun(unittest.TestCase):
         self.log = root / 'fake.json'
         self.env = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}',
                     'FAKE_LOG': str(self.log), 'ANTHROPIC_API_KEY': 'test-key',
+                    'ANTHROPIC_AUTH_TOKEN': 'test-token', 'CLAUDE_CODE_OAUTH_TOKEN': 'test-oauth',
                     'CLAUDE_CONFIG_DIR': str(root / 'claude-home')}
 
     def tearDown(self):
@@ -81,6 +88,7 @@ class AgentRun(unittest.TestCase):
         self.assertEqual(seen['stdin'], 'Check the done-when items.\n')
         self.assertEqual(seen['cwd'], str(self.checkout))
         self.assertFalse(seen['anthropic_api_key'])
+        self.assertEqual(seen['claude_tokens'], [])
         self.assertEqual(list(Path(seen['claude_config_dir']).iterdir()), [])
         for name in ('command.json', 'events.jsonl', 'last.md', 'stderr.log', 'exit'):
             self.assertTrue((self.run_dir / name).exists(), name)
@@ -94,6 +102,7 @@ class AgentRun(unittest.TestCase):
     def test_codex_continuation_keeps_claude_reachable(self):
         _, seen = self.start_and_wait('codex', 'continue')
         self.assertTrue(seen['anthropic_api_key'])
+        self.assertEqual(len(seen['claude_tokens']), 2)
         self.assertEqual(seen['claude_config_dir'], self.env['CLAUDE_CONFIG_DIR'])
         self.assertEqual(seen['argv'][seen['argv'].index('-s') + 1], 'danger-full-access')
 
@@ -128,6 +137,20 @@ class AgentRun(unittest.TestCase):
         self.assertFalse((self.run_dir / 'exit').exists())
         waited = self.agent_run('wait', str(self.run_dir))
         self.assertIn('verdict: pass', waited.stdout)
+
+    def test_stopping_the_run_stops_the_agent_and_still_marks_the_exit(self):
+        child_pid = self.run_dir.parent / 'child.pid'
+        self.agent_run('start', 'codex', 'verify', str(self.run_dir), FAKE_SLEEP='30',
+                       FAKE_PID=str(child_pid))
+        for _ in range(50):
+            if child_pid.exists() and child_pid.read_text():
+                break
+            time.sleep(0.1)
+        os.kill(int((self.run_dir / 'pid').read_text()), signal.SIGTERM)
+        waited = self.agent_run('wait', str(self.run_dir), check=False)
+        self.assertEqual(waited.returncode, 128 + signal.SIGTERM)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(child_pid.read_text()), 0)
 
     def test_agent_failure_is_the_wait_exit_code(self):
         waited, _ = self.start_and_wait('claude', 'verify', FAKE_EXIT='3')

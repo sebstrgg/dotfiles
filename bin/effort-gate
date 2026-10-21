@@ -82,7 +82,10 @@ def table(text, section):
             continue
         if not in_section or not line.strip().startswith('|'):
             continue
-        cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
+        inner = line.strip()[1:]
+        if inner.endswith('|') and not inner.endswith('\\|'):
+            inner = inner[:-1]
+        cells = [cell.strip() for cell in re.split(r'(?<!\\)\|', inner)]
         if header is None:
             header = [cell.lower() for cell in cells]
         elif not all(set(cell) <= set('-: ') for cell in cells):
@@ -224,7 +227,8 @@ def stop(event, runtime=None):
         counter.unlink(missing_ok=True)
         return None
     tasks = running_tasks(text)
-    signature = hashlib.sha256('\n'.join(items + table_rows(text, 'running tasks')).encode()).hexdigest()
+    rows = table_rows(text, 'done when') + table_rows(text, 'running tasks')
+    signature = hashlib.sha256('\n'.join(rows).encode()).hexdigest()
     try:
         previous, count = counter.read_text().split()
         count = int(count) if previous == signature else 0

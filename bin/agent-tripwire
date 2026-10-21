@@ -2,49 +2,84 @@
 """PreToolUse hook for Claude Code and Codex: refuse a force-push.
 
 Reads the hook event on stdin. For a shell command that runs `git push` with
-`--force`, `-f` (alone or in a short-flag group) or a `+refspec`, it prints a
-deny decision; every other call passes silently. `--force-with-lease` and
-`--force-if-includes` stay allowed: they refuse to overwrite work the agent has
-not fetched.
+`--force`, `--mirror`, `-f` (alone or in a short-flag group) or a `+refspec`, it
+prints a deny decision; every other call passes silently. `--force-with-lease`
+and `--force-if-includes` stay allowed: they refuse to overwrite work the agent
+has not fetched.
 
 Permission rules match command text by position, so a force flag after the
 remote, or `git -C <dir>` in front, slipped past them; this reads the words of
-each simple command instead. It is a tripwire, not a boundary: a push hidden in
-`sh -c`, a script or an alias still runs.
+each simple command instead, skipping here-document bodies and comments. It is a
+tripwire, not a boundary: a push hidden in `sh -c`, a script or an alias still
+runs.
 """
 import json
 import re
 import shlex
 import sys
 
-SEPARATORS = {'&&', '||', ';', '|', '&', '|&', '(', ')'}
+SEPARATOR_CHARS = '();<>|&`\n'
+HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 GIT_OPTIONS_WITH_VALUE = {'-C', '-c', '--git-dir', '--work-tree', '--namespace'}
-WRAPPERS = {'command', 'exec', 'nohup', 'time', 'env', 'sudo'}
+PUSH_OPTIONS_WITH_VALUE = {'-o', '--push-option', '--repo', '--receive-pack', '--exec'}
+WRAPPERS = {'command', 'exec', 'nohup', 'time', 'env', 'sudo', 'nice', 'timeout'}
+CONTROL_WORDS = {'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{', '--'}
 ASSIGNMENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*=')
-SHORT_FORCE = re.compile(r'-[A-Za-z]*f[A-Za-z]*')
+
+
+def without_heredoc_bodies(command):
+    """Drop here-document bodies: they are data, and their prose breaks quoting."""
+    kept, ends = [], []
+    for line in command.split('\n'):
+        if ends:
+            if line.strip() == ends[0]:
+                ends.pop(0)
+            continue
+        kept.append(line)
+        ends = [match.group(2) for match in HEREDOC.finditer(line)]
+    return '\n'.join(kept)
+
+
+def tokens(text):
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=SEPARATOR_CHARS)
+    lexer.whitespace = ' \t\r'
+    lexer.whitespace_split = True
+    lexer.commenters = ''
+    return list(lexer)
 
 
 def simple_commands(command):
-    """Word lists of each simple command, split at shell operators and newlines."""
-    for line in command.splitlines():
-        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
-        lexer.whitespace_split = True
-        words = []
-        for token in lexer:
-            if token in SEPARATORS:
-                yield words
-                words = []
-            else:
-                words.append(token)
-        yield words
+    """Word lists of each simple command, split at shell operators and line ends."""
+    text = without_heredoc_bodies(command).replace('\\\n', ' ')
+    try:
+        words_and_operators = tokens(text)
+    except ValueError:
+        # Unbalanced quoting somewhere: still read every line that parses alone.
+        words_and_operators = []
+        for line in text.split('\n'):
+            try:
+                words_and_operators += tokens(line)
+            except ValueError:
+                pass
+            words_and_operators.append('\n')
+    words, in_comment = [], False
+    for token in words_and_operators:
+        if set(token) <= set(SEPARATOR_CHARS):
+            yield words
+            words, in_comment = [], False
+        elif in_comment or token.startswith('#'):
+            in_comment = True
+        else:
+            words.append(token)
+    yield words
 
 
 def strip_prefix(words):
-    """Drop leading variable assignments and wrappers such as `timeout 30`."""
+    """Drop leading assignments, control words and wrappers such as `timeout 30`."""
     while words:
-        if ASSIGNMENT.match(words[0]) or words[0] in WRAPPERS:
+        if ASSIGNMENT.match(words[0]) or words[0] in CONTROL_WORDS:
             words = words[1:]
-        elif words[0] in ('timeout', 'nice'):
+        elif words[0] in WRAPPERS:
             words = words[1:]
             while words and (words[0].startswith('-') or words[0][:1].isdigit()):
                 words = words[1:]
@@ -62,8 +97,21 @@ def force_push(words):
         rest = rest[2:] if rest[0] in GIT_OPTIONS_WITH_VALUE else rest[1:]
     if not rest or rest[0] != 'push':
         return False
-    for word in rest[1:]:
-        if word == '--force' or SHORT_FORCE.fullmatch(word) or word.startswith('+'):
+    arguments = iter(rest[1:])
+    for word in arguments:
+        if word in ('--force', '--mirror'):
+            return True
+        if word in PUSH_OPTIONS_WITH_VALUE:
+            next(arguments, None)
+        elif word.startswith('-') and not word.startswith('--'):
+            for position, flag in enumerate(word[1:], start=2):
+                if flag == 'f':
+                    return True
+                if flag == 'o':
+                    if position == len(word):
+                        next(arguments, None)
+                    break
+        elif word.startswith('+'):
             return True
     return False
 

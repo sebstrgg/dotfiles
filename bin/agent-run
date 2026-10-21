@@ -28,12 +28,14 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 ROLES = ('work', 'continue', 'verify', 'review')
+CLAUDE_CREDENTIALS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN')
 MODELS = {'codex': 'gpt-6.1-sol', 'claude': 'opus'}
 REPORT_ONLY = {'verify', 'review'}
 
@@ -60,7 +62,8 @@ def environment(runtime, role, run_dir):
         signed_out = run_dir / 'claude-signed-out'
         signed_out.mkdir(exist_ok=True)
         env['CLAUDE_CONFIG_DIR'] = str(signed_out)
-        env.pop('ANTHROPIC_API_KEY', None)
+        for name in CLAUDE_CREDENTIALS:
+            env.pop(name, None)
     return env
 
 
@@ -68,8 +71,6 @@ def start(args):
     run_dir = Path(args.run_dir).expanduser().resolve()
     if not (run_dir / 'prompt.md').is_file():
         sys.exit(f'agent-run: {run_dir / "prompt.md"} is missing; write the prompt there first')
-    if (run_dir / 'command.json').exists():
-        sys.exit(f'agent-run: {run_dir} was already used by a run; give each run its own folder')
     model = args.model or MODELS[args.runtime]
     effort = args.effort or default_effort(args.runtime, args.role)
     argv = command(args.runtime, args.role, model, effort, run_dir)
@@ -77,7 +78,11 @@ def start(args):
         sys.exit(f'agent-run: {argv[0]} is not on PATH')
     record = {'runtime': args.runtime, 'role': args.role, 'model': model, 'effort': effort,
               'cwd': os.getcwd(), 'argv': argv, 'started': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
-    (run_dir / 'command.json').write_text(json.dumps(record, indent=2) + '\n')
+    try:
+        with (run_dir / 'command.json').open('x') as claimed:
+            claimed.write(json.dumps(record, indent=2) + '\n')
+    except FileExistsError:
+        sys.exit(f'agent-run: {run_dir} was already used by a run; give each run its own folder')
     supervisor = subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), '_supervise', str(run_dir)],
         env=environment(args.runtime, args.role, run_dir), start_new_session=True,
@@ -89,15 +94,21 @@ def start(args):
 
 
 def supervise(run_dir):
-    """Run the agent with the prompt on stdin, then write last.md and the exit marker."""
+    """Run the agent with the prompt on stdin, then write last.md and the exit marker.
+    A signal that stops this supervisor is passed on to the agent, so stopping the
+    recorded pid stops the run and still leaves an exit marker."""
     record = json.loads((run_dir / 'command.json').read_text())
     code = 127
     try:
         with ((run_dir / 'prompt.md').open() as stdin,
               (run_dir / 'events.jsonl').open('w') as stdout,
               (run_dir / 'stderr.log').open('w') as stderr):
-            code = subprocess.run(record['argv'], cwd=record['cwd'], stdin=stdin, stdout=stdout,
-                                  stderr=stderr, check=False).returncode
+            agent = subprocess.Popen(record['argv'], cwd=record['cwd'], stdin=stdin,
+                                     stdout=stdout, stderr=stderr)
+            for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+                signal.signal(signum, lambda received, _frame: agent.send_signal(received))
+            code = agent.wait()
+            code = 128 - code if code < 0 else code
         if record['runtime'] == 'claude':
             result = claude_result(run_dir / 'events.jsonl')
             if result is not None:
