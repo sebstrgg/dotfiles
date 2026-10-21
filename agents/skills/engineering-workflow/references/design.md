@@ -11,8 +11,9 @@ Read for any UI, visual design or user-facing copy, in either runtime.
   goes back to Claude; Codex does not choose visual direction.
 - **Claude reviews** the rendered result against the design and this reference
   before it counts as done.
-- A new project or new direction: Claude presents distinct alternatives and
-  Sebastian picks. Inside an approved direction: proceed and show the result.
+- UI with no approved direction yet, however small (one page, one screen):
+  Claude presents distinct alternatives and Sebastian picks before the build.
+  Inside an approved direction: proceed and show the result.
 
 ## Bespoke, never generic
 

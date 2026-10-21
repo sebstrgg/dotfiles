@@ -48,7 +48,8 @@ diagnosis Sol couldn't crack, and cross-family review.
 - A delegated agent works its brief and reports back. It does not start second
   opinions, reviews or further delegation; the orchestrator decides those.
 - Workers make no paid or metered calls (`claude -p`, model APIs). Only the
-  orchestrator spends, within what Sebastian approved.
+  orchestrator spends, within what Sebastian approved; the cross-family verify
+  and reviews the workflow calls for are part of every approved brief.
 - Lanes do not overlap: one writer per file or resource.
 - Workers commit locally. The orchestrator pushes, opens the pull request and
   starts CI, batching reviewed work into one PR.
@@ -62,7 +63,8 @@ diagnosis Sol couldn't crack, and cross-family review.
 
 - `verify` runs in a fresh agent, from the other model family where the target
   is reachable from it: a Claude orchestrator sends it to Codex, a Codex
-  orchestrator to Claude.
+  orchestrator to Claude, both through `agent-run`. A subagent that forks the
+  orchestrator's context is not fresh.
 - Cross-family code review for expensive-to-miss code: Codex reviews
   Claude-written code, Claude reviews Codex-written code. Fix confirmed findings
   and re-check once.
@@ -86,24 +88,22 @@ diagnosis Sol couldn't crack, and cross-family review.
 - When you keep briefing the same kind of worker, propose a definition in
   `~/.claude/agents/` with model, effort and tools pinned.
 
-## Codex mechanics
+## Cross-runtime runs
 
-- From Claude: the `codex` plugin (`codex:codex-rescue`, `/codex:review`,
-  `/codex:adversarial-review`, `/codex:status`, `/codex:result`,
-  `/codex:cancel`) or `codex exec`. An unfinished job is a clean-up obligation.
-- `codex exec` runs in the task's own worktree with model and effort pinned,
-  prompt on stdin, JSON events, last message and an exit marker written to a run
-  folder, started detached in its own process session (`setsid`, for example
-  via Python on macOS). Resume with `codex exec resume <thread>`. Wait for the
-  exit marker with one Monitor.
+- `~/dotfiles/bin/agent-run start <codex|claude> <role> <run-dir>` starts every
+  `codex exec` and `claude -p` run, from the task's own worktree, with the
+  prompt in `<run-dir>/prompt.md`. The role (`work`, `continue`, `verify`,
+  `review`) pins model, effort and access, detaches the run and records it in
+  the run folder; `--model` and `--effort` override. `agent-run wait <run-dir>`
+  blocks until it ends and prints the last message and resume handle: from
+  Claude as a background command, from Codex in the foreground.
+- `agent-run` starts Codex lanes, verifiers and reviewers signed out of Claude;
+  only a `continue` run keeps Claude reachable.
 - Run folders live under `.scratch/<effort>/runs/`, never `/tmp`: a restart
   wipes `/tmp` and the work with it.
 - A run stopped by a usage limit: schedule a wake-up for the reset time and
-  resume it.
-- Reviews and probes run read-only. Workers that commit, and tasks that need
-  Docker or network, run `danger-full-access`: `workspace-write` blocks `.git`.
-- A Codex orchestrator reaches Claude with `claude -p --model <model>`, or the
-  interface's delegation tool when one is available. Lanes never do: start
-  each `codex exec` with `CLAUDE_CONFIG_DIR` set to an empty folder and
-  `ANTHROPIC_API_KEY` unset, which leaves `claude` signed out.
+  resume it (`codex exec resume <thread>`, `claude -p --resume <session>`).
+- From Claude, the `codex` plugin (`/codex:review`,
+  `/codex:adversarial-review`, `codex:codex-rescue`) also works. An unfinished
+  job is a clean-up obligation.
 - Use one shared brief file plus a short per-task prompt.

@@ -17,13 +17,11 @@ next step. Link specs, tickets and commits instead of copying them.
 
 ## 2. Start the continuation yourself
 
-- Codex: `codex exec resume <thread>` for the same thread, or a new `codex exec`
-  in the effort's checkout, detached in its own process session, with
-  `-s danger-full-access` (`workspace-write` blocks commits) and the prompt
-  below on stdin.
-- Claude: a new session in the effort's checkout with the prompt below; for an
-  unattended continuation, `claude -p` started detached.
-- Give the runtime, model and effort per `delegate`.
+- Write the prompt below to `.scratch/<effort>/runs/continue-<n>/prompt.md`
+  and, from the effort's checkout, run
+  `~/dotfiles/bin/agent-run start <codex|claude> continue <that folder>`. It
+  pins model and effort per `delegate` (`--model` and `--effort` change them)
+  and gives the continuation full access, so it can commit and verify.
 
 Prompt, at most 10 lines: the effort file path, "run
 `~/dotfiles/bin/effort-gate claim <file>` and resume from Next", and any

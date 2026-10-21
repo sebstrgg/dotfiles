@@ -192,14 +192,24 @@ machine. Start a new agent session after installation.
   the owner back at the file. Verifiers and workers in the same checkout are
   not gated. `.scratch/` is kept out of git through the repository's
   `info/exclude`. Hooks: `claude/settings.json`, `codex/hooks.json`
-  (Codex asks once to trust new hooks via `/hooks`). Tests:
+  (Codex asks once to trust new hooks via `/hooks`). A "done when" item marked
+  `pass` on evidence labelled a substitute stays open. Tests:
   `python3 tests/effort-gate.test.py`.
-- **Tripwires.** `claude/settings.json` denies, and
-  [`codex/rules/tripwires.rules`](codex/rules/tripwires.rules) forbids,
-  force-push, repository deletion and settings changes, Docker volume removal
-  and wiping `/` or `~`. They catch the usual spellings, not every one (Codex
-  rules match only a command's leading words): a tripwire, not a boundary.
-  Codex ignores symlinked rule files, so the installer copies this one.
+- **Cross-runtime runs.** [`bin/agent-run`](bin/agent-run) starts a detached
+  `codex exec` or `claude -p` run for a role (`work`, `continue`, `verify`,
+  `review`) with model, effort and access pinned, the prompt and results in a
+  run folder, and `wait` blocks until it ends. Codex lanes start signed out of
+  Claude. Tests: `python3 tests/agent-run.test.py`.
+- **Tripwires.** [`bin/agent-tripwire`](bin/agent-tripwire), a PreToolUse hook
+  in both runtimes, refuses `git push` with `--force`, `-f` or a `+refspec`
+  wherever the flag sits; `--force-with-lease` stays allowed. Alongside it,
+  `claude/settings.json` denies, and
+  [`codex/rules/tripwires.rules`](codex/rules/tripwires.rules) forbids, the
+  common force-push forms, repository deletion and settings changes, Docker
+  volume removal and wiping `/` or `~`. They catch the usual spellings, not a
+  push hidden in a script or `sh -c`: a tripwire, not a boundary. Codex ignores
+  symlinked rule files, so the installer copies this one. Tests:
+  `python3 tests/agent-tripwire.test.py`.
 - `bin/agent-messages --days N` lists Sebastian's own messages from local
   Claude and Codex sessions, for the weekly review.
 

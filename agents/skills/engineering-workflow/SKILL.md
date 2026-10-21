@@ -77,8 +77,9 @@ check:
    with the fastest decisive check, and record the evidence in the effort file.
 2. Code where a missed bug is expensive (security, auth or secrets, persisted
    data, migrations or deletion, concurrency, paid calls, public contracts, a
-   large cross-module change) gets one cross-family `code-review`. Fix
-   confirmed findings and re-check once.
+   large cross-module change) gets one cross-family review
+   (`~/dotfiles/bin/agent-run start <codex|claude> review`). Fix confirmed
+   findings and re-check once.
 3. Full CI and slow suites run once, on the final change.
 
 Infrastructure and configuration: live readback plus the affected behaviour.
@@ -94,10 +95,11 @@ in the effort file.
 
 Dispatch a fresh agent to run `verify` against the "done when" list on the real
 target (after deploy when the outcome lives on a deployed service), from the
-other model family: from Claude, `codex exec` per `delegate`; from Codex,
-`claude -p --model opus`. The effort owner dispatches it as part of the approved
-workflow. Fix what fails and verify again. Verification is complete when every
-item passes.
+other model family: write its prompt to `.scratch/<effort>/runs/<run>/prompt.md`
+and run `~/dotfiles/bin/agent-run start codex verify <run-dir>` from Claude, or
+`start claude verify` from Codex, then `agent-run wait <run-dir>`. Every
+approved brief includes this dispatch. Fix what fails and verify again.
+Verification is complete when every item passes.
 
 ## 7. Close
 
@@ -109,8 +111,8 @@ item passes.
 - Report from the effort file: the outcome, the evidence (naming any item
   checked only by a substitute), decisions worth knowing, and what Sebastian
   needs to do. Each reserved action still under "Not approved" ends the report
-  as a question to him with your recommendation, even when all local work is
-  done.
+  as a yes/no question to him with your recommended answer, even when all local
+  work is done.
 - After substantial rework, an escaped defect or repeated steering: `retro`,
   then fix the environment (a check, a tool, or one rule) rather than adding
   prose.
@@ -122,7 +124,9 @@ item passes.
   stop legitimately, set `status: blocked` with the blocker recorded, or
   `status: done` after `verify` passes.
 - Waiting on a job or agent: record it under "Running tasks" with state
-  `running`. Claude ends its turn and is woken when it finishes; Codex waits
-  with one blocking wait on its completion. Update the row when it ends.
+  `running`. Claude waits through a background command (the job itself, or
+  `agent-run wait <run-dir>`) and ends its turn; it is woken when that command
+  ends. Codex runs one blocking wait in the foreground. Update the row when it
+  ends.
 - Keep the effort file current whenever a decision, approval, item status or
   next step changes. After compaction it is the source of truth.
