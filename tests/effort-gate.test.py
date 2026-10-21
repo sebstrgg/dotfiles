@@ -443,6 +443,25 @@ class EffortGate(unittest.TestCase):
         last = 'Done.\n\n- Go public? I recommend no.\n- Rotate the key? I recommend yes.'
         self.assertIsNone(self.run_gate('stop', last=last))
 
+    def test_two_commits_in_one_second_each_ask_for_a_verify(self):
+        self.write_effort(status='done', first='pass', verified_by=())
+        self.commit('2026-10-21T11:00:00+02:00')
+        self.assertEqual(self.run_gate('stop', last='Done.')['decision'], 'block')
+        self.commit('2026-10-21T11:00:00+02:00')
+        self.assertEqual(self.run_gate('stop', last='Done.')['decision'], 'block')
+
+    def test_semicolons_inside_parentheses_and_bracketed_items_count_right(self):
+        path = self.write_effort(status='done', first='pass')
+        one_question = 'Done.\n\n- Go ahead? I recommend yes.'
+        path.write_text(path.read_text().replace(
+            '**Not approved:** None.', '**Not approved:**\n\n- Publish preview (docs (public); examples)'))
+        self.assertIsNone(self.run_gate('stop', last=one_question))
+        self.session = str(uuid.uuid4())
+        self.write_effort(status='done', first='pass')
+        path.write_text(path.read_text().replace(
+            '**Not approved:** None.', '**Not approved:**\n\n- (Publish repository)\n- (Rotate key)'))
+        self.assertEqual(self.run_gate('stop', last=one_question)['decision'], 'block')
+
     def test_close_question_keeps_answered_actions_with_sebastian(self):
         self.write_effort(status='done', first='pass', not_approved='Going public.')
         reason = self.run_gate('stop', last='Done.')['reason']

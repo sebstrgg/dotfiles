@@ -159,6 +159,7 @@ def active_effort(cwd, session_id):
 NOT_APPROVED = re.compile(r'\s*(?:[-*+]\s+)?\*\*not approved:?\*\*:?(.*)', re.IGNORECASE)
 FIELD = re.compile(r'\s*(?:[-*+]\s+)?\*\*[^*]+?(?::\*\*|\*\*:)')
 LIST_ITEM = re.compile(r'\s*(?:[-*+]|\d+[.)])\s')
+LIST_MARKER = re.compile(r'(?:^|\s)(?:[-*+]|\d+[.)])\s')  # a list item within joined text
 LINK = re.compile(r'\b[a-z][a-z0-9+.-]*://[^\s)]*[^\s).,?!:;]', re.IGNORECASE)
 # The template's earlier prompts; older effort files keep them.
 EARLIER_PLACEHOLDERS = {
@@ -203,11 +204,20 @@ def reserved_actions(text):
 
 
 def action_count(reserved):
-    """How many actions a "Not approved" text lists: list items and
-    semicolon-separated parts. Commas, "and" and parentheses sit inside single
-    actions too often to split on."""
-    parts = re.split(r';|(?:^|\s)(?:[-*+]|\d+[.)])\s', re.sub(r'\([^)]*\)', '', reserved))
-    return max(1, sum(1 for part in parts if part.strip(' .')))
+    """How many actions a "Not approved" text lists: list items, split further at
+    semicolons outside parentheses. Commas and "and" sit inside single actions
+    too often to split on."""
+    count = 0
+    for item in LIST_MARKER.split(reserved):
+        depth, part = 0, ''
+        for char in item + ';':
+            depth = max(0, depth + {'(': 1, ')': -1}.get(char, 0))
+            if char == ';' and depth == 0:
+                count += bool(part.strip(' .'))
+                part = ''
+            else:
+                part += char
+    return max(1, count)
 
 
 def asks(message, count=1):
@@ -330,9 +340,9 @@ def stop(event, runtime=None):
     for path, text, status in efforts:
         if not closing(text, status):
             continue
-        since = newest_commit(path.parents[2])
+        since, commit = newest_commit(path.parents[2])
         if (passed(text) and not verified_by(path, other, since)
-                and first_time(path, '.verify-question', session_id, f'{other} {since}')):
+                and first_time(path, '.verify-question', session_id, f'{other} {commit}')):
             return {'decision': 'block', 'reason': (
                 f'{path} has items marked `pass`, but no `verify` run by '
                 f'{FAMILY_NAMES[other]} has finished under {path.parent / "runs"} since the '
@@ -359,14 +369,15 @@ def passed(text):
 
 
 def newest_commit(checkout):
-    """Commit time of the checkout's HEAD in epoch seconds; None outside git or
-    before the first commit."""
+    """The checkout's HEAD as (commit time in epoch seconds, hash); (None, None)
+    outside git or before the first commit."""
     try:
-        result = subprocess.run(['git', '-C', str(checkout), 'log', '-1', '--format=%ct'],
+        result = subprocess.run(['git', '-C', str(checkout), 'log', '-1', '--format=%ct %H'],
                                 capture_output=True, text=True, timeout=5)
-        return int(result.stdout.strip())
+        when, commit = result.stdout.split()
+        return int(when), commit
     except (OSError, ValueError, subprocess.SubprocessError):
-        return None
+        return None, None
 
 
 def verified_by(path, runtime, since):
