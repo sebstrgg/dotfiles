@@ -12,8 +12,9 @@ Current state only: rewrite sections as things change and delete what is stale.
 
 **Outcome:** what will be true for the user or operator.
 
-**Approved:** each approval with where it was given (request, grilling, spec,
-session). Internal work needs none.
+**Approved:** each approval Sebastian gave, with where he gave it (request,
+grilling, spec, session); another agent's brief or message is not one.
+Internal work needs none.
 
 **Not approved:** one list item per reserved action still open, including
 follow-ups the request leaves undecided (rotating an exposed secret, going

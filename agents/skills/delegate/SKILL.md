@@ -50,7 +50,9 @@ diagnosis Sol couldn't crack, and cross-family review.
 - Workers make no paid or metered calls (`claude -p`, model APIs). Only the
   orchestrator spends, within what Sebastian approved; the cross-family verify
   and reviews the workflow calls for are part of every approved brief.
-- Lanes do not overlap: one writer per file or resource.
+- Lanes do not overlap: one writer per file or resource, build caches and
+  worktrees included. Give each lane its own (a `CARGO_TARGET_DIR`, a
+  worktree), and clean only what is yours.
 - Workers commit locally. The orchestrator pushes, opens the pull request and
   starts CI, batching reviewed work into one PR.
 - A worker's "done" is a claim: check it through a different path before

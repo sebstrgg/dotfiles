@@ -106,6 +106,17 @@ class EffortGate(unittest.TestCase):
         self.assertIn('#1 Login works', output['reason'])
         self.assertNotIn('Logout', output['reason'])
 
+    def test_done_when_outside_the_template_table_is_held(self):
+        path = self.write_effort()
+        text = path.read_text()
+        table = text[text.index('| # | Item'):text.index('## Blockers')]
+        path.write_text(text.replace(table, '1. Login works\n2. Logout works\n\n'))
+        self.assertIn('template table', self.run_gate('stop')['reason'])
+        context = self.run_gate('context', event='SessionStart')['hookSpecificOutput']
+        self.assertIn('template table', context['additionalContext'])
+        path.write_text(path.read_text().replace('status: active', 'status: done'))
+        self.assertIn('template table', self.run_gate('stop')['reason'])
+
     def test_block_asks_for_a_cross_family_verify_and_a_report(self):
         self.write_effort()
         reason = self.run_gate('stop')['reason']

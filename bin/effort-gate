@@ -119,9 +119,14 @@ def table(text, section):
 def open_items(text):
     """Rows of the "Done when" table not yet `pass` or `blocked`: any other status,
     including `fail` or a misspelling, keeps the item open. So does a `pass` whose
-    evidence names a substitute check: a substitute never closes an item."""
+    evidence names a substitute check: a substitute never closes an item. A
+    "Done when" without table rows is one open item, since nothing can be read."""
+    rows = table(text, 'done when')
+    if not rows:
+        return ['"Done when" is not in the template table (| # | Item | Check on the real '
+                'target | Status | Evidence |), so the gate cannot read its items']
     items = []
-    for row in table(text, 'done when'):
+    for row in rows:
         name = f"#{row.get('#', '?')} {row.get('item', '').strip()}".strip()
         status = row.get('status', '').strip('`* ').lower()
         if status == 'pass' and re.search(r'\bsubstitute', row.get('evidence', ''), re.IGNORECASE):
