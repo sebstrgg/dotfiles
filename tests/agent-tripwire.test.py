@@ -134,11 +134,9 @@ class AgentTripwire(unittest.TestCase):
                         'ps -axo pid,ucomm',
                         'ps -u sebastian -o pid,comm',
                         'ps -o pid=command -p 1',
-                        'ps axo pid,comm',
-                        'ps axo pid,comm -g',
-                        'ps -g 100 -o pid,comm',
-                        'ps -T -o pid,comm',
                         'ps -o pid,comm:20',
+                        'ps -p 123,456 -o pid=,comm=',
+                        'ps -Ao pid,ppid,rss,comm',
                         'pgrep -x node',
                         'pgrep -f vite',
                         'pgrep -l node',
@@ -147,6 +145,17 @@ class AgentTripwire(unittest.TestCase):
                         'git commit -m "never run ps aux"',
                         'man ps'):
             self.assertEqual(decide(command), 'allow', command)
+
+    def test_ps_outside_the_names_only_form_is_refused(self):
+        for command in ('ps axo pid,comm',
+                        'ps t -o command',
+                        'ps ax -C node',
+                        'ps ax -g root',
+                        'ps -g 100 -o pid,comm',
+                        'ps -T -o pid,comm',
+                        'ps --pid 1 -o pid',
+                        'ps -o pid,comm 123'):
+            self.assertEqual(decide(command), 'deny', command)
 
     def test_codex_argv_command_is_read(self):
         self.assertEqual(decide(['bash', '-lc', 'git push origin main --force']), 'deny')

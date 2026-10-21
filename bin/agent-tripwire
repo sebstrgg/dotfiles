@@ -6,9 +6,10 @@ Reads the hook event on stdin. For a shell command that runs `git push` with
 `--force`, `--mirror`, `-f` (alone or in a short-flag group) or a `+refspec`, it
 prints a deny decision. `--force-with-lease` and `--force-if-includes` stay
 allowed: they refuse to overwrite work the agent has not fetched. A `ps` or
-`pgrep` that prints arguments is denied too: tools pass API keys and whole
+`pgrep` that may print arguments is denied too: tools pass API keys and whole
 environments as arguments, and a listing filtered through grep still carries
-them. Every other call passes silently.
+them. `ps` flags read differently per platform and mode, so only one plain
+names-only form passes. Every other call passes silently.
 
 Permission rules match command text by position, so a force flag after the
 remote, or `git -C <dir>` in front, slipped past them; this reads the words of
@@ -34,10 +35,8 @@ WRAPPERS = {  # wrapper -> its options that take a value
 CONTROL_WORDS = {'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{', '--'}
 ASSIGNMENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*=')
 PS_ARGUMENT_FIELDS = {'args', 'command', 'cmd'}
-PS_ADDS_ARGUMENTS = set('EFMOfjlv')  # formats with a command column, or the environment
-PS_LEGACY_ADDS_ARGUMENTS = PS_ADDS_ARGUMENTS | set('Xesu')
-PS_OPTIONS_WITH_VALUE = set('GUgoptu')
-PS_LEGACY_OPTIONS_WITH_VALUE = set('GUopt')  # macOS legacy mode: `-g` takes none, `-u` is a format
+PS_SELECTING_FLAGS = set('Aadehmrwx')  # choose or sort processes, add no column
+PS_OPTIONS_WITH_VALUE = set('GUoptu')
 PGREP_OPTIONS_WITH_VALUE = set('FGMNPUdgrstu')
 
 
@@ -204,9 +203,11 @@ def force_push(words):
 
 
 def lists_arguments(words):
-    """A `ps` or `pgrep` that prints process arguments: `ps` without an output
-    format, with an `args`/`command`/`cmd` column, or with a flag that adds one;
-    `pgrep -a`, or `-l` with `-f`."""
+    """A `ps` or `pgrep` that may print process arguments. `ps` passes only in the
+    form that reads the same on macOS and Linux: dashed flags that choose or sort
+    processes, `-p`/`-t`/`-u`/`-U`/`-G` with their values, and `-o` formats with
+    no `args`, `command` or `cmd` column. `pgrep` is refused with `-a`, or `-l`
+    with `-f`."""
     words = strip_prefix(words)
     if not words:
         return False
@@ -224,32 +225,19 @@ def lists_arguments(words):
         return 'a' in flags or {'l', 'f'} <= flags
     if name != 'ps':
         return False
-    arguments = words[1:]
-    # macOS reads the whole call in legacy (BSD) mode when its first argument has no dash.
-    legacy = bool(arguments) and not arguments[0].startswith('-')
-    formats, rest = [], iter(arguments)
+    formats, rest = [], iter(words[1:])
     for word in rest:
-        if word.startswith('--'):
-            option, has_value, value = word.partition('=')
-            if option == '--format':
-                formats.append(value if has_value else next(rest, ''))
-            continue
-        bare = not word.startswith('-')
-        if bare and not word[:1].isalpha():
-            continue  # a process ID
-        adds = PS_LEGACY_ADDS_ARGUMENTS if legacy or bare else PS_ADDS_ARGUMENTS
-        takes_value = PS_LEGACY_OPTIONS_WITH_VALUE if legacy or bare else PS_OPTIONS_WITH_VALUE
-        letters = word.lstrip('-')
+        if not word.startswith('-') or word.startswith('--'):
+            return True  # BSD groups, long options and operands read differently per platform
+        letters = word[1:]
         for position, letter in enumerate(letters, start=1):
-            if letter in adds:
-                return True
-            if letter in takes_value:
+            if letter in PS_OPTIONS_WITH_VALUE:
                 value = letters[position:] or next(rest, '')
                 if letter == 'o':
                     formats.append(value)
                 break
-            if not letter.isalpha():
-                break
+            if letter not in PS_SELECTING_FLAGS:
+                return True
     fields = {field.partition('=')[0].partition(':')[0]
               for value in formats for field in re.split(r'[,\s]+', value)}
     return not formats or bool(fields & PS_ARGUMENT_FIELDS)
