@@ -186,21 +186,26 @@ machine. Start a new agent session after installation.
   [the template](agents/skills/engineering-workflow/templates/effort.md), owned
   by the calling agent session (front matter `session:`); `claim <file>` hands
   it to another session. As the Stop hook it keeps the owner from ending its
-  turn while the file has unfinished "done when" items; as the post-compaction
-  hook it points the owner back at the file. Verifiers and workers in the same
-  checkout are not gated. Hooks: `claude/settings.json`, `codex/hooks.json`
+  turn while the file has unfinished "done when" items; while a recorded task
+  is `running`, Claude (which wakes the session when the task ends) may stop
+  and Codex is asked for a blocking wait. As the post-compaction hook it points
+  the owner back at the file. Verifiers and workers in the same checkout are
+  not gated. `.scratch/` is kept out of git through the repository's
+  `info/exclude`. Hooks: `claude/settings.json`, `codex/hooks.json`
   (Codex asks once to trust new hooks via `/hooks`). Tests:
   `python3 tests/effort-gate.test.py`.
 - **Tripwires.** `claude/settings.json` denies, and
   [`codex/rules/tripwires.rules`](codex/rules/tripwires.rules) forbids,
   force-push, repository deletion and settings changes, Docker volume removal
-  and wiping `/` or `~`. Codex ignores symlinked rule files, so the installer
-  copies this one.
+  and wiping `/` or `~`. They catch the usual spellings, not every one (Codex
+  rules match only a command's leading words): a tripwire, not a boundary.
+  Codex ignores symlinked rule files, so the installer copies this one.
 - `bin/agent-messages --days N` lists Sebastian's own messages from local
   Claude and Codex sessions, for the weekly review.
 
-`dots-doctor` checks the links, the copied tripwire file and the seeded
-settings; `dots-doctor --fix` repairs drift.
+`dots-doctor` checks the links, the copied tripwire file, the seeded settings
+and the agent setup's keys in the live Claude and Codex configs;
+`dots-doctor --fix` repairs drift.
 
 ## Updating dotfiles
 

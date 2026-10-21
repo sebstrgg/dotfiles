@@ -18,8 +18,9 @@ next step. Link specs, tickets and commits instead of copying them.
 ## 2. Start the continuation yourself
 
 - Codex: `codex exec resume <thread>` for the same thread, or a new `codex exec`
-  in the effort's checkout, detached in its own process session, with the
-  prompt below on stdin.
+  in the effort's checkout, detached in its own process session, with
+  `-s danger-full-access` (`workspace-write` blocks commits) and the prompt
+  below on stdin.
 - Claude: a new session in the effort's checkout with the prompt below; for an
   unattended continuation, `claude -p` started detached.
 - Give the runtime, model and effort per `delegate`.

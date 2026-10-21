@@ -100,8 +100,8 @@ diagnosis Sol couldn't crack, and cross-family review.
   wipes `/tmp` and the work with it.
 - A run stopped by a usage limit: schedule a wake-up for the reset time and
   resume it.
-- Reviews and probes run read-only. Full access only when the task needs Docker
-  or network, never for reviews.
+- Reviews and probes run read-only. Workers that commit, and tasks that need
+  Docker or network, run `danger-full-access`: `workspace-write` blocks `.git`.
 - A Codex orchestrator reaches Claude with `claude -p --model <model>`, or the
   interface's delegation tool when one is available. Lanes never do: start
   each `codex exec` with `CLAUDE_CONFIG_DIR` set to an empty folder and

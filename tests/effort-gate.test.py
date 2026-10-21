@@ -30,6 +30,12 @@ session: {session}
 
 None.
 
+## Running tasks
+
+| Task | Runtime, model, effort | Handle | Worktree / branch | State |
+|---|---|---|---|---|
+{task}
+
 ## Next
 
 Keep going.
@@ -47,17 +53,18 @@ class EffortGate(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def write_effort(self, status='active', first='open', checkout=None):
+    def write_effort(self, status='active', first='open', checkout=None, task=''):
         path = self.repo / '.scratch' / 'example' / 'effort.md'
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(EFFORT.format(status=status, first=first, checkout=checkout or self.repo,
-                                      session=self.session))
+                                      session=self.session, task=task))
         return path
 
-    def run_gate(self, mode, cwd=None, event='Stop', session=None):
+    def run_gate(self, mode, cwd=None, event='Stop', session=None, runtime=None):
         payload = {'session_id': session or self.session, 'cwd': str(cwd or self.repo),
                    'hook_event_name': event}
-        result = subprocess.run(['python3', str(GATE), mode], input=json.dumps(payload),
+        command = ['python3', str(GATE), mode, *([runtime] if runtime else [])]
+        result = subprocess.run(command, input=json.dumps(payload),
                                 capture_output=True, text=True, check=True)
         return json.loads(result.stdout) if result.stdout.strip() else None
 
@@ -70,6 +77,29 @@ class EffortGate(unittest.TestCase):
         self.assertEqual(output['decision'], 'block')
         self.assertIn('#1 Login works', output['reason'])
         self.assertNotIn('Logout', output['reason'])
+
+    def test_block_asks_for_a_cross_family_verify_and_a_report(self):
+        self.write_effort()
+        reason = self.run_gate('stop')['reason']
+        self.assertIn('other model family', reason)
+        self.assertIn('report', reason)
+
+    def test_running_task_lets_a_runtime_that_wakes_on_it_stop(self):
+        self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
+        for _ in range(7):
+            self.assertIsNone(self.run_gate('stop', runtime='claude'))
+
+    def test_running_task_holds_other_runtimes_without_counting_a_stall(self):
+        path = self.write_effort(task='| Export | codex exec | run-7 | main | running since 09:10 |')
+        outputs = [self.run_gate('stop') for _ in range(7)]
+        self.assertTrue(all(o['decision'] == 'block' for o in outputs))
+        self.assertIn('Export', outputs[-1]['reason'])
+        self.assertIn('blocking wait', outputs[-1]['reason'])
+        self.assertIn('status: active', path.read_text())
+
+    def test_finished_task_does_not_count_as_running(self):
+        self.write_effort(task='| Export | Bash | bg-1 | main | finished |')
+        self.assertEqual(self.run_gate('stop', runtime='claude')['decision'], 'block')
 
     def test_stop_from_subdirectory_is_gated(self):
         self.write_effort()
@@ -174,7 +204,10 @@ class EffortGate(unittest.TestCase):
         text = path.read_text()
         self.assertIn(f'checkout: {self.repo}\n', text)
         self.assertIn(f'session: {self.session}\n', text)
-        self.assertIn('.scratch/', (self.repo / '.gitignore').read_text())
+        self.assertFalse((self.repo / '.gitignore').exists())
+        status = subprocess.run(['git', '-C', str(self.repo), 'status', '--porcelain'],
+                                capture_output=True, text=True, check=True).stdout
+        self.assertEqual(status, '')
         self.assertEqual(self.run_gate('stop')['decision'], 'block')
 
     def test_new_keeps_an_existing_effort(self):

@@ -106,8 +106,9 @@ check_copy() {
     local src="$REPO_DIR/$1" dst="$2"
     if [[ -e "$dst" && ! -L "$dst" ]]; then ok "$dst present"; return; fi
     # Missing, or wrongly a symlink → (re)seed.
-    if [[ -L "$dst" ]]; then warn "$dst is a symlink — $1 rewrites this file and breaks the link"; rm -f "$dst"; fi
+    if [[ -L "$dst" ]]; then warn "$dst is a symlink — $1 rewrites this file and breaks the link"; fi
     if [[ $FIX -eq 1 ]]; then
+        rm -f "$dst"
         mkdir -p "$(dirname "$dst")"
         if cp "$src" "$dst"; then ok "seeded: $dst"; else bad "could not copy $dst"; fi
     else
@@ -125,6 +126,26 @@ elif [[ $FIX -eq 1 ]]; then
     if /bin/cp "$REPO_DIR/codex/rules/tripwires.rules" "$_rules"; then ok "copied: $_rules"; else bad "could not copy $_rules"; fi
 else
     bad "$_rules: missing, a symlink, or out of date (run --fix)"
+fi
+# The apps rewrite these files, so check the agent setup's keys in the live copies.
+_cs="$HOME/.claude/settings.json"
+if command -v jq &>/dev/null && [[ -f "$_cs" ]]; then
+    if jq -e '.autoMemoryEnabled == false
+        and .env.CLAUDE_CODE_AUTO_COMPACT_WINDOW != null
+        and ([.hooks.Stop[]?.hooks[]?.command] | any(test("effort-gate stop claude")))
+        and ([.hooks.SessionStart[]? | select(.matcher == "compact") | .hooks[]?.command]
+             | any(test("effort-gate context")))
+        and (.permissions.deny | index("Bash(git push --force:*)") != null)' "$_cs" >/dev/null; then
+        ok "$_cs: effort hooks, memory off, compaction window, tripwires"
+    else
+        bad "$_cs: an agent-setup key is missing (compare with claude/settings.json)"
+    fi
+fi
+_cc="$HOME/.codex/config.toml"
+if [[ -f "$_cc" ]] && grep -qx 'memories = false' "$_cc" && grep -qx 'hooks = true' "$_cc"; then
+    ok "$_cc: memory off, hooks on"
+else
+    bad "$_cc: memories = false or hooks = true missing"
 fi
 
 # ── 3. Machine-local rc exists ──────────────────────────────────────

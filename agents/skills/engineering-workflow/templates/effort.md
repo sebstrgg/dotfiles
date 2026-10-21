@@ -40,6 +40,8 @@ None.
 
 ## Running tasks
 
+State `running` while it runs; the stop gate reads it.
+
 | Task | Runtime, model, effort | Handle | Worktree / branch | State |
 |---|---|---|---|---|
 

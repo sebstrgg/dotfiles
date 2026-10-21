@@ -4,7 +4,7 @@
   effort-gate new <effort>  Create .scratch/<effort>/effort.md in this checkout
                             from the template, owned by the calling session.
   effort-gate claim <file>  Make the calling session the owner (taking over).
-  effort-gate stop          Stop hook: block ending the turn while the session's
+  effort-gate stop [claude] Stop hook: block ending the turn while the session's
                             active effort file has open "done when" items.
   effort-gate context       Compaction hook: point the agent back at the file.
 
@@ -14,6 +14,12 @@ the owner is gated: verifiers and workers running in the same checkout, and
 copies of the file in other worktrees, never match.
 After MAX_IDENTICAL_BLOCKS stops without progress the gate stops blocking: it
 marks the effort `blocked`, records why under "## Blockers" and warns the user.
+
+A row under "## Running tasks" whose state says `running` means the agent waits on
+a job. Claude Code wakes a session when its background task ends, so its Stop hook
+passes `claude` and the gate lets that session end its turn. Codex has no such
+wake-up: the gate holds the session and asks for a blocking wait, without counting
+the stop as a stall.
 """
 import hashlib
 import json
@@ -28,6 +34,7 @@ MAX_IDENTICAL_BLOCKS = 5
 TEMPLATE = (Path(__file__).resolve().parents[1]
             / 'agents' / 'skills' / 'engineering-workflow' / 'templates' / 'effort.md')
 SESSION_VARIABLES = {'codex': 'CODEX_THREAD_ID', 'claude': 'CLAUDE_CODE_SESSION_ID'}
+RUNTIMES_THAT_WAKE = {'claude'}
 
 
 def read_event():
@@ -65,13 +72,12 @@ def front_matter(text):
 FINISHED = {'pass', 'blocked'}
 
 
-def open_items(text):
-    """Rows of the "Done when" table not yet `pass` or `blocked`: any other status,
-    including `fail` or a misspelling, keeps the item open."""
+def table(text, section):
+    """Rows of the first table under `## <section>`, as dicts keyed by lowercased header."""
     rows, header, in_section = [], None, False
     for line in text.splitlines():
         if line.startswith('## '):
-            in_section = line[3:].strip().lower() == 'done when'
+            in_section = line[3:].strip().lower() == section
             continue
         if not in_section or not line.strip().startswith('|'):
             continue
@@ -79,10 +85,21 @@ def open_items(text):
         if header is None:
             header = [cell.lower() for cell in cells]
         elif not all(set(cell) <= set('-: ') for cell in cells):
-            row = dict(zip(header, cells))
-            if row.get('status', '').strip('`* ').lower() not in FINISHED:
-                rows.append(f"#{row.get('#', '?')} {row.get('item', '').strip()}".strip())
+            rows.append(dict(zip(header, cells)))
     return rows
+
+
+def open_items(text):
+    """Rows of the "Done when" table not yet `pass` or `blocked`: any other status,
+    including `fail` or a misspelling, keeps the item open."""
+    return [f"#{row.get('#', '?')} {row.get('item', '').strip()}".strip()
+            for row in table(text, 'done when')
+            if row.get('status', '').strip('`* ').lower() not in FINISHED]
+
+
+def running_tasks(text):
+    return [row.get('task', '?') for row in table(text, 'running tasks')
+            if re.search(r'\brunning\b', row.get('state', ''), re.IGNORECASE)]
 
 
 def active_effort(cwd, session_id):
@@ -144,12 +161,17 @@ def new(name):
     path.write_text(set_owner(text, session_id))
     ignored = subprocess.run(['git', '-C', str(root), 'check-ignore', '-q', str(path)],
                              capture_output=True, check=False).returncode == 0
-    if not ignored and (root / '.git').exists():
-        gitignore = root / '.gitignore'
-        existing = gitignore.read_text() if gitignore.exists() else ''
+    exclude = subprocess.run(['git', '-C', str(root), 'rev-parse', '--path-format=absolute',
+                              '--git-path', 'info/exclude'],
+                             capture_output=True, text=True, check=False).stdout.strip()
+    if not ignored and exclude:
+        # The repository's local exclude file keeps .scratch/ out of git without a
+        # change to the tracked .gitignore.
+        exclude = Path(exclude)
+        existing = exclude.read_text() if exclude.exists() else ''
         separator = '\n' if existing and not existing.endswith('\n') else ''
-        gitignore.write_text(f'{existing}{separator}.scratch/\n')
-        print(f'Added .scratch/ to {gitignore}')
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        exclude.write_text(f'{existing}{separator}.scratch/\n')
     print(path)
 
 
@@ -179,16 +201,23 @@ def mark_blocked(path, text, items):
     path.write_text(text)
 
 
-def stop(event):
+def stop(event, runtime=None):
     session_id = str(event.get('session_id', ''))
     path, text = active_effort(event.get('cwd') or os.getcwd(), session_id)
     if path is None:
         return None
     items = open_items(text)
     counter = counter_path(session_id)
-    if not items:
+    tasks = running_tasks(text)
+    if not items or tasks:
         counter.unlink(missing_ok=True)
+    if not items or (tasks and runtime in RUNTIMES_THAT_WAKE):
         return None
+    if tasks:
+        return {'decision': 'block', 'reason': (
+            f'{path} records a running task: {"; ".join(tasks)}. Wait for it with one blocking '
+            'wait on its completion (its process or exit marker), then continue. If it has '
+            'already finished, record that and continue.')}
     signature = hashlib.sha256('\n'.join(items).encode()).hexdigest()
     try:
         previous, count = counter.read_text().split()
@@ -205,9 +234,10 @@ def stop(event):
     counter.write_text(f'{signature} {count + 1}')
     return {'decision': 'block', 'reason': (
         f'{path} has "done when" items not yet `pass`: {"; ".join(items)}. '
-        'Continue the work; an item becomes `pass` when verify passes it on the real target. '
-        'If you cannot proceed, record the blocker and set `status: blocked`; once every '
-        'item passes, set `status: done`.')}
+        'Continue the work. An item becomes `pass` when a fresh `verify` run from the other '
+        'model family (see `delegate`) passes it on the real target. If you cannot proceed, '
+        'record the blocker and set `status: blocked`; once every item passes, set '
+        '`status: done`. End with a report of the work to Sebastian.')}
 
 
 def context(event):
@@ -225,11 +255,12 @@ def main():
     if len(sys.argv) == 3 and sys.argv[1] in ('new', 'claim'):
         (new if sys.argv[1] == 'new' else claim)(sys.argv[2])
         return 0
-    if len(sys.argv) != 2 or sys.argv[1] not in ('stop', 'context'):
+    runtime = sys.argv[2] if len(sys.argv) == 3 and sys.argv[1] == 'stop' else None
+    if len(sys.argv) != (3 if runtime else 2) or sys.argv[1] not in ('stop', 'context'):
         print(__doc__, file=sys.stderr)
         return 2
     event = read_event()
-    output = stop(event) if sys.argv[1] == 'stop' else context(event)
+    output = stop(event, runtime) if sys.argv[1] == 'stop' else context(event)
     if output:
         print(json.dumps(output))
     return 0
