@@ -34,11 +34,11 @@ WRAPPERS = {  # wrapper -> its options that take a value
 }
 CONTROL_WORDS = {'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{', '--'}
 ASSIGNMENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*=')
-PS_SELECTING_FLAGS = set('Aadhmrwx')  # choose or sort processes, add no column
+PS_SELECTING_FLAGS = set('Aadhmrw')  # choose or sort processes, add no column (procps `-x` can)
 PS_OPTIONS_WITH_VALUE = set('GUopt')
 PS_NAME_FIELDS = {  # columns that never hold arguments or the environment, on macOS and procps
     'pid', 'ppid', 'pgid', 'sess', 'tpgid', 'uid', 'ruid', 'user', 'ruser', 'gid', 'rgid',
-    'group', 'tty', 'tt', 'stat', 'state', 'rss', 'vsz', '%cpu', '%mem', 'pcpu', 'pmem',
+    'group', 'tty', 'tt', 'stat', 'state', 'rss', 'vsz', 'pcpu', 'pmem',
     'comm', 'ucomm', 'ucmd', 'etime', 'etimes', 'time', 'cputime', 'start', 'lstart',
     'nice', 'ni', 'pri', 'flags', 'wchan', 'nlwp'}
 PGREP_OPTIONS_WITH_VALUE = set('FGMNPUdgrstu')
@@ -242,6 +242,8 @@ def lists_arguments(words):
                 break
             if letter not in PS_SELECTING_FLAGS:
                 return True
+    if any('%' in value for value in formats):
+        return True  # procps reads a format it rejects again as AIX codes, where `%a` is the arguments
     fields = {field.partition('=')[0].partition(':')[0]
               for value in formats for field in re.split(r'[,\s]+', value)} - {''}
     return not formats or not fields <= PS_NAME_FIELDS
@@ -272,7 +274,7 @@ def main():
                   '--force-with-lease; anything else needs Sebastian.')
     elif any(lists_arguments(words) for words in commands):
         reason = ('Process arguments can carry secrets, and this listing would copy them into '
-                  'the transcript. List names only: `ps -axo pid,rss,comm`, `pgrep -x <name>`, '
+                  'the transcript. List names only: `ps -Ao pid,rss,comm`, `pgrep -x <name>`, '
                   'or `pgrep -f <pattern>` for PIDs.')
     else:
         return 0

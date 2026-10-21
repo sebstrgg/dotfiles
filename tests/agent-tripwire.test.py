@@ -125,13 +125,14 @@ class AgentTripwire(unittest.TestCase):
             self.assertEqual(decide(command), 'deny', command)
 
     def test_process_listings_of_names_and_ids_are_allowed(self):
-        for command in ('ps -axo pid,rss,comm',
-                        'ps -axo pid,rss,comm | sort -k2 -n',
+        for command in ('ps -Ao pid,rss,comm',
+                        'ps -Ao pid,rss,comm | sort -k2 -n',
                         'ps -p 123 -o pid,comm',
                         'ps -o pid= -p 123',
                         'ps -o stat= -p 123',
                         'ps -Ao pid,ppid,etime,comm',
-                        'ps -axo pid,ucomm',
+                        'ps -Ao pid,ucomm',
+                        'ps -Ao pid,pcpu,pmem,comm',
                         'ps -U 501 -o pid,user,comm',
                         'ps -o pid=command -p 1',
                         'ps -o pid,comm:20',
@@ -161,7 +162,11 @@ class AgentTripwire(unittest.TestCase):
                         'ps -axeww -o pid,comm',
                         'ps -axo environ',
                         'ps -axo %a',
-                        'ps -axo DefSysV'):
+                        'ps -axo DefSysV',
+                        'ps -axo pid,rss,comm',
+                        "ps -Ao '%cpu:%a'",
+                        'ps -Ao pid,%cpu,comm',
+                        'PS_PERSONALITY=hpux ps -axo comm'):
             self.assertEqual(decide(command), 'deny', command)
 
     def test_codex_argv_command_is_read(self):
