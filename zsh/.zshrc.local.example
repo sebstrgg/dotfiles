@@ -2,7 +2,7 @@
 #
 # This file is sourced near the end of ~/.zshrc, after every plugin and prompt,
 # and immediately before zoxide. It exists so that installers which append to
-# your rc (bun, rustup, tool completions, claude-auto-retry, …) write HERE
+# your rc (bun, rustup, tool completions, …) write HERE
 # instead of corrupting the tracked ~/.zshrc.
 #
 # `dots-doctor --fix` will seed this file by extracting installer blocks from an
@@ -19,11 +19,3 @@
 #   autoload -Uz compinit && compinit
 #   source <(entire completion zsh)
 # fi
-
-# ── Example: claude-auto-retry wrapper ───────────────
-# This wrapper is generated verbatim by `claude-auto-retry install`. It injects
-# a hardcoded nvm path (intentional — see the tool's "Node version lock" note;
-# re-run `claude-auto-retry install` after a node bump). Let the tool own it —
-# keep its block here in ~/.zshrc.local, not in the tracked ~/.zshrc.
-#   npm i -g claude-auto-retry && claude-auto-retry install
-# (then move the injected block from ~/.zshrc into this file)

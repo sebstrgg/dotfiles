@@ -157,9 +157,9 @@ Aliases `dots`, `dots-doctor`, and `dots-update` are defined in `.zshrc`.
 
 ### `~/.zshrc.local` — machine-local overrides
 
-Installer-managed blocks (bun, shell completions, the `claude-auto-retry`
-wrapper, etc.) live in `~/.zshrc.local`, **not** the tracked `.zshrc`. This
-keeps installers that append to your rc from corrupting the committed file.
+Installer-managed blocks (bun, shell completions, etc.) live in
+`~/.zshrc.local`, **not** the tracked `.zshrc`. This keeps installers that
+append to your rc from corrupting the committed file.
 The first install seeds it from `zsh/.zshrc.local.example`; edit it freely.
 
 ## Global agent workflows
@@ -212,13 +212,15 @@ machine. Start a new agent session after installation.
   `python3 tests/agent-run.test.py`.
 - **Tripwires.** [`bin/agent-tripwire`](bin/agent-tripwire), a PreToolUse hook
   in both runtimes, refuses `git push` with `--force`, `-f` or a `+refspec`
-  wherever the flag sits; `--force-with-lease` stays allowed. Alongside it,
-  `claude/settings.json` denies, and
+  wherever the flag sits; `--force-with-lease` stays allowed. It also refuses
+  a `ps` or `pgrep` that could print process arguments, which can carry
+  secrets: only a names-only listing such as `ps -Ao pid,rss,comm` passes.
+  Alongside it, `claude/settings.json` denies, and
   [`codex/rules/tripwires.rules`](codex/rules/tripwires.rules) forbids, the
   common force-push forms, repository deletion and settings changes, Docker
   volume removal and wiping `/` or `~`. They catch the usual spellings, not a
-  push hidden in a script or `sh -c`: a tripwire, not a boundary. Codex ignores
-  symlinked rule files, so the installer copies this one. Tests:
+  push hidden in a script or `sh -c`: a tripwire, not a boundary. Codex
+  ignores symlinked rule files, so the installer copies this one. Tests:
   `python3 tests/agent-tripwire.test.py`.
 - **Clock.** A UserPromptSubmit hook in both runtimes adds the Stockholm local
   time to each prompt, so ETAs start from the real clock.

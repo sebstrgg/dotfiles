@@ -48,32 +48,12 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "test -f ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-track.sh && bash ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-track.sh"
-          }
-        ]
-      },
-      {
         "matcher": "compact",
         "hooks": [
           {
             "type": "command",
             "command": "python3 ~/dotfiles/bin/effort-gate context",
             "timeout": 10
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "test -f ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-cleanup.sh && bash ~/.tmux/plugins/tmux-assistant-resurrect/hooks/claude-session-cleanup.sh"
           }
         ]
       }

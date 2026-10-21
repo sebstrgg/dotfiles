@@ -396,16 +396,15 @@ section_header "$_cfg_step" "${SECTION_TITLES[$_cfg_step - 1]}" \
 info "Symlinking configuration files..."
 
 # ── Lift installer-managed blocks out of an existing ~/.zshrc ──────────────
-# If ~/.zshrc already exists as a regular file with bun/entire/claude-auto-retry
-# blocks appended by installers, move them into ~/.zshrc.local so they can't
-# corrupt the tracked rc once we symlink over it.
+# If ~/.zshrc already exists as a regular file with bun/entire blocks appended
+# by installers, move them into ~/.zshrc.local so they can't corrupt the tracked
+# rc once we symlink over it.
 if [[ -f "$HOME/.zshrc" && ! -L "$HOME/.zshrc" && ! -f "$HOME/.zshrc.local" ]]; then
-    if grep -qE 'BUN_INSTALL|entire completion|claude-auto-retry' "$HOME/.zshrc"; then
+    if grep -qE 'BUN_INSTALL|entire completion' "$HOME/.zshrc"; then
         info "Extracting installer-managed blocks from ~/.zshrc → ~/.zshrc.local"
         awk '
             /^# bun/ || /^export BUN_INSTALL/  { p=1 }
             /^# Entire CLI/                    { p=1 }
-            /^# >>> claude-auto-retry/         { p=1 }
             p { print }
         ' "$HOME/.zshrc" > "$HOME/.zshrc.local"
         ok "Seeded ~/.zshrc.local from existing rc"

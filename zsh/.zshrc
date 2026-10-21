@@ -203,10 +203,10 @@ fi
 eval "$(starship init zsh)"
 
 # ── Machine-local overrides ───────────────────────────
-# Installer-managed blocks (bun, shell completions, claude-auto-retry wrapper)
-# live in ~/.zshrc.local so installers appending to the rc can't corrupt this
-# tracked file. Sourced BEFORE zoxide — none of them touch chpwd_functions,
-# so they don't interfere with zoxide's hook.
+# Installer-managed blocks (bun, shell completions) live in ~/.zshrc.local so
+# installers appending to the rc can't corrupt this tracked file. Sourced
+# BEFORE zoxide — none of them touch chpwd_functions, so they don't interfere
+# with zoxide's hook.
 [[ -f ~/.zshrc.local ]] && source ~/.zshrc.local
 
 # ── zoxide (smart cd) — KEEP AT THE VERY END ──────────
