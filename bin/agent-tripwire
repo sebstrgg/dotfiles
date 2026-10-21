@@ -54,7 +54,7 @@ def read(text, i, commands, inside):
         if word is not None:
             words.append(word)
             if wants_delimiter:
-                heredocs.append(word.lstrip('-'))
+                heredocs.append(word)
                 wants_delimiter = False
             word = None
 
@@ -89,10 +89,13 @@ def read(text, i, commands, inside):
             end_command()
             i = skip_heredoc_bodies(text, i + 1, heredocs)
             heredocs = []
-        elif text.startswith('<<', i) and not text.startswith('<<<', i):
+        elif text.startswith('<<<', i):
+            end_command()
+            i += 3
+        elif text.startswith('<<', i):
             end_command()
             wants_delimiter = True
-            i += 2
+            i += 3 if text.startswith('<<-', i) else 2
         elif char == ')' and inside and depth == 0:
             end_command()
             return i + 1

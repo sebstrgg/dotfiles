@@ -53,6 +53,9 @@ class AgentTripwire(unittest.TestCase):
                         "git push -o '#build' --force origin main",
                         'echo `git push -f`',
                         'echo "$(git push --force origin main)"',
+                        'cat <<< "$message"\ngit push --force origin main',
+                        'cat <<- EOF\nmessage\nEOF\ngit push --force origin main',
+                        'cat <<-EOF\n\tmessage\n\tEOF\ngit push --force origin main',
                         'git commit -m "$(cat <<\'EOF\'\nIt\'s done (mostly)\nEOF\n)" && git push -f'):
             self.assertEqual(decide(command), 'deny', command)
 
