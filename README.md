@@ -194,9 +194,10 @@ machine. Start a new agent session after installation.
   `info/exclude`. Hooks: `claude/settings.json`, `codex/hooks.json`
   (Codex asks once to trust new hooks via `/hooks`). A "done when" item marked
   `pass` on evidence labelled a substitute stays open, also in an effort set
-  to `done`. When a finished effort still lists reserved actions under "Not
-  approved" and the last message asks nothing, the gate holds the owner once
-  to ask them. Tests:
+  to `done`. At close it holds the owner once if items passed without a
+  finished `agent-run` verify by the other runtime under the effort's `runs/`,
+  and once if "Not approved" lists actions the last message does not ask.
+  Tests:
   `python3 tests/effort-gate.test.py`.
 - **Cross-runtime runs.** [`bin/agent-run`](bin/agent-run) starts a detached
   `codex exec` or `claude -p` run for a role (`work`, `continue`, `verify`,

@@ -126,8 +126,9 @@ when every item passes.
   while the effort file has open items; other sessions are never gated. To
   stop legitimately, set `status: blocked` with the blocker recorded, or
   `status: done` after `verify` passes (`done` with an unfinished item is
-  still held). At close it holds the owner once more if "Not approved" lists
-  actions and the report asks nothing.
+  still held). At close it holds the owner once more if items passed without
+  a finished verify by the other family under `runs/`, or if "Not approved"
+  lists actions the report does not ask.
 - Waiting on a job or agent: record it under "Running tasks" with state
   `running`. Claude waits through a background command (the job itself, or
   `agent-run wait <run-dir>`) and ends its turn; it is woken when that command

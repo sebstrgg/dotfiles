@@ -24,10 +24,12 @@ toward the cap too, so a stale `running` row ends in `blocked` rather than holdi
 or freeing the session forever; any change to an item or task row is progress.
 
 When the owner ends a turn on a finished effort (status `done` or `blocked`, or
-every item passed with nothing running) whose brief still lists reserved actions
-under "Not approved", and its last message asks fewer questions than it lists
-actions, the gate holds it once to ask each one as a yes/no question. A marker beside the effort file keeps it to
-once per owner and list.
+every item passed with nothing running), the gate holds it once more in two
+cases: items are `pass` but no `verify` run by the other runtime has finished
+under the effort's `runs/` folder (`bin/agent-run` records each run there), or
+the brief still lists reserved actions under "Not approved" and the last message
+asks fewer questions than it lists actions. Markers beside the effort file keep
+each to once per owner and subject.
 """
 import contextlib
 import hashlib
@@ -44,6 +46,8 @@ TEMPLATE = (Path(__file__).resolve().parents[1]
             / 'agents' / 'skills' / 'engineering-workflow' / 'templates' / 'effort.md')
 SESSION_VARIABLES = {'codex': 'CODEX_THREAD_ID', 'claude': 'CLAUDE_CODE_SESSION_ID'}
 RUNTIMES_THAT_WAKE = {'claude'}
+OTHER_FAMILY = {'claude': 'codex', 'codex': 'claude'}
+FAMILY_NAMES = {'claude': 'Claude', 'codex': 'Codex'}
 
 
 def read_event():
@@ -313,10 +317,22 @@ def stop(event, runtime=None):
     with contextlib.suppress(OSError):
         counter_path(session_id).unlink(missing_ok=True)
     last_message = event.get('last_assistant_message')
+    other = OTHER_FAMILY[runtime or 'codex']
     for path, text, status in efforts:
-        reserved = reserved_actions(text) if closing(text, status) else ''
+        if not closing(text, status):
+            continue
+        if (passed(text) and not verified_by(path, other)
+                and first_time(path, '.verify-question', session_id, other)):
+            return {'decision': 'block', 'reason': (
+                f'{path} has items marked `pass`, but no `verify` run by '
+                f'{FAMILY_NAMES[other]} has finished under {path.parent / "runs"}. Only a fresh '
+                'verify from the other model family makes an item `pass`; a same-family check '
+                f'adds evidence. If {FAMILY_NAMES[other]} could not run, set those items back to '
+                '`open` or `blocked`, record why, and correct your report. If it did pass them '
+                'by another route, name that run in Evidence.')}
+        reserved = reserved_actions(text)
         if (reserved and not asks(last_message, action_count(reserved))
-                and first_close_question(path, session_id, reserved)):
+                and first_time(path, '.close-question', session_id, reserved)):
             return {'decision': 'block', 'reason': (
                 f'{path} lists reserved actions under "Not approved": {reserved.rstrip(".")}. '
                 'End your report with each one still open as a yes/no question to Sebastian '
@@ -325,11 +341,30 @@ def stop(event, runtime=None):
     return None
 
 
-def first_close_question(path, session_id, reserved):
-    """Record the close question for this owner and list; False if already asked,
-    or if it cannot be recorded, since an unrecorded question would repeat."""
-    marker = path.parent / '.close-question'
-    signature = hashlib.sha256(f'{session_id}\n{reserved}'.encode()).hexdigest()
+def passed(text):
+    return any(row.get('status', '').strip('`* ').lower() == 'pass'
+               for row in table(text, 'done when'))
+
+
+def verified_by(path, runtime):
+    """Whether a `verify` run by `runtime` has finished under the effort's runs folder."""
+    for record in path.parent.glob('runs/*/command.json'):
+        try:
+            run = json.loads(record.read_text())
+            finished = (record.parent / 'exit').read_text().strip() == '0'
+        except (OSError, ValueError):
+            continue
+        if (finished and isinstance(run, dict) and run.get('role') == 'verify'
+                and run.get('runtime') == runtime):
+            return True
+    return False
+
+
+def first_time(path, marker_name, session_id, subject):
+    """Record a close-time question for this owner and subject; False if already
+    asked, or if it cannot be recorded, since an unrecorded question would repeat."""
+    marker = path.parent / marker_name
+    signature = hashlib.sha256(f'{session_id}\n{subject}'.encode()).hexdigest()
     try:
         if marker.read_text(errors='replace').strip() == signature:
             return False

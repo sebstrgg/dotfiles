@@ -59,13 +59,23 @@ class EffortGate(unittest.TestCase):
         self.tmp.cleanup()
 
     def write_effort(self, status='active', first='open', checkout=None, task='', evidence='',
-                     not_approved='None.'):
+                     not_approved='None.', verified_by=('claude', 'codex')):
         path = self.repo / '.scratch' / 'example' / 'effort.md'
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(EFFORT.format(status=status, first=first, checkout=checkout or self.repo,
                                       session=self.session, task=task,
                                       evidence=evidence, not_approved=not_approved))
+        for runtime in verified_by:
+            self.record_run(path, runtime)
         return path
+
+    def record_run(self, path, runtime, role='verify', exit_code='0'):
+        """A finished agent-run run folder beside the effort file."""
+        run = path.parent / 'runs' / f'{role}-{runtime}'
+        run.mkdir(parents=True, exist_ok=True)
+        (run / 'command.json').write_text(json.dumps({'runtime': runtime, 'role': role}))
+        if exit_code is not None:
+            (run / 'exit').write_text(f'{exit_code}\n')
 
     def run_gate(self, mode, cwd=None, event='Stop', session=None, runtime=None, last=None):
         payload = {'session_id': session or self.session, 'cwd': str(cwd or self.repo),
@@ -228,6 +238,7 @@ class EffortGate(unittest.TestCase):
         path = self.repo / '.scratch' / 'login' / 'effort.md'
         path.write_text(path.read_text().replace('status: active', 'status: done')
                         .replace('| open |', '| pass |'))
+        self.record_run(path, 'claude')
         self.assertIsNone(self.run_gate('stop', last='Done.'))
 
     def test_waiting_on_blocked_items_is_not_a_close(self):
@@ -347,6 +358,35 @@ class EffortGate(unittest.TestCase):
         last = ('Done.\n\n- Make the repository public? I recommend no.\n'
                 '- Rotate the key exposed in app.py (commit 1a2b3c4)? I recommend yes.')
         self.assertIsNone(self.run_gate('stop', last=last))
+
+    def test_close_without_a_cross_family_verify_is_questioned_once(self):
+        self.write_effort(status='done', first='pass', verified_by=('codex',))
+        output = self.run_gate('stop', last='Done; a fresh Codex agent verified it.')
+        self.assertEqual(output['decision'], 'block')
+        self.assertIn('Claude', output['reason'])
+        self.assertIn('`blocked`', output['reason'])
+        self.assertIsNone(self.run_gate('stop', last='Done.'))
+
+    def test_claude_owner_needs_a_codex_verify(self):
+        self.write_effort(status='done', first='pass', verified_by=('claude',))
+        self.assertIn('Codex', self.run_gate('stop', runtime='claude', last='Done.')['reason'])
+
+    def test_close_with_a_finished_cross_family_verify_is_not_questioned(self):
+        self.write_effort(status='done', first='pass', verified_by=('claude',))
+        self.assertIsNone(self.run_gate('stop', last='Done.'))
+
+    def test_unfinished_or_review_runs_are_not_a_verify(self):
+        path = self.write_effort(status='done', first='pass', verified_by=())
+        self.record_run(path, 'claude', exit_code=None)
+        self.record_run(path, 'claude', role='review')
+        self.assertEqual(self.run_gate('stop', last='Done.')['decision'], 'block')
+
+    def test_close_with_nothing_passed_needs_no_verify(self):
+        self.write_effort(status='blocked', first='blocked', verified_by=())
+        path = self.repo / '.scratch' / 'example' / 'effort.md'
+        path.write_text(path.read_text().replace('| 2 | Logout works | real browser | pass |',
+                                                 '| 2 | Logout works | real browser | blocked |'))
+        self.assertIsNone(self.run_gate('stop', last='Blocked on access.'))
 
     def test_waiting_mid_effort_is_not_a_close(self):
         self.write_effort(task='| Export | Bash | bg-1 | main | running |',
