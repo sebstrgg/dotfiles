@@ -9,10 +9,15 @@
   effort-gate context       Compaction hook: point the agent back at the file.
 
 An effort file is `.scratch/<effort>/effort.md` with front matter `status: active`
-(or `done`, which is held too while an item is unfinished), `checkout:` equal to
-this checkout and `session:` naming the owning session. Only
-the owner is gated: verifiers and workers running in the same checkout, and
-copies of the file in other worktrees, never match.
+(or `done`, which is held too while an item is unfinished), `checkout:` naming
+the checkout it lives in and `session:` naming the owning session. The gate
+looks in every worktree of the session's repository. Only the owner is gated:
+other sessions in the same checkout, and copies of the file in a checkout their
+`checkout:` does not name, never match.
+
+A run started by `bin/agent-run` in a delegated role carries AGENT_RUN_ROLE.
+It works its orchestrator's brief: the hooks never gate it, and `new` and
+`claim` refuse, since the effort file belongs to the orchestrator.
 After MAX_IDENTICAL_BLOCKS stops without progress the gate stops blocking: it
 marks the effort `blocked`, records why under "## Blockers" and warns the user.
 
@@ -30,8 +35,9 @@ under the effort's `runs/` folder (`bin/agent-run` records each run there) after
 starting no earlier than the checkout's newest commit, or
 the brief still lists reserved actions under "Not approved" and the last message
 asks fewer questions than it lists actions (one per list item or `;`-separated
-part). Markers beside the effort file keep each to once per owner and subject; a
-new commit is a new subject for the verify question.
+part; a first sentence of `None.` lists none). Markers beside the effort file
+keep each to once per owner and subject; a new commit is a new subject for the
+verify question.
 """
 import contextlib
 import hashlib
@@ -134,19 +140,36 @@ def running_tasks(text):
             if re.search(r'\brunning\b', row.get('state', ''), re.IGNORECASE)]
 
 
+def worktree_roots(cwd):
+    """This checkout's root, then every other worktree of its repository."""
+    root = checkout_root(cwd)
+    try:
+        result = subprocess.run(['git', '-C', str(root), 'worktree', 'list', '--porcelain'],
+                                capture_output=True, text=True, timeout=3, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return [root]
+    others = [Path(line.removeprefix('worktree ')).resolve()
+              for line in result.stdout.splitlines() if line.startswith('worktree ')]
+    return [root] + [tree for tree in others if tree != root]
+
+
 def owned_efforts(cwd, session_id):
-    """(path, text, status) of each effort file in this checkout that the session owns."""
-    root, efforts = checkout_root(cwd), []
-    for path in sorted(root.glob('.scratch/*/effort.md')):
-        try:
-            text = path.read_text(errors='replace')
-        except OSError:
-            continue
-        fields = front_matter(text)
-        checkout = fields.get('checkout', '')
-        if (session_id and fields.get('session') == session_id
-                and checkout and Path(checkout).expanduser().resolve() == root):
-            efforts.append((path, text, fields.get('status')))
+    """(path, text, status) of each effort file the session owns in any worktree
+    of this repository, counted only in the checkout its `checkout:` names."""
+    efforts = []
+    if not session_id:
+        return efforts
+    for root in worktree_roots(cwd):
+        for path in sorted(root.glob('.scratch/*/effort.md')):
+            try:
+                text = path.read_text(errors='replace')
+            except OSError:
+                continue
+            fields = front_matter(text)
+            checkout = fields.get('checkout', '')
+            if (fields.get('session') == session_id
+                    and checkout and Path(checkout).expanduser().resolve() == root):
+                efforts.append((path, text, fields.get('status')))
     return efforts
 
 
@@ -160,7 +183,7 @@ def active_effort(cwd, session_id):
 NOT_APPROVED = re.compile(r'\s*(?:[-*+]\s+)?\*\*not approved:?\*\*:?(.*)', re.IGNORECASE)
 FIELD = re.compile(r'\s*(?:[-*+]\s+)?\*\*[^*]+?(?::\*\*|\*\*:)')
 LIST_ITEM = re.compile(r'\s*(?:[-*+]|\d+[.)])\s')
-LIST_MARKER = re.compile(r'(?:^|\s)(?:[-*+]|\d+[.)])\s')  # a list item within joined text
+NONE_FIRST = re.compile(r'[\s`*_]*(?:none|nothing)[`*_]*\.[`*_]*(?:\s|$)', re.IGNORECASE)
 LINK = re.compile(r'\b[a-z][a-z0-9+.-]*://[^\s)]*[^\s).,?!:;]', re.IGNORECASE)
 # The template's earlier prompts; older effort files keep them.
 EARLIER_PLACEHOLDERS = {
@@ -172,24 +195,28 @@ EARLIER_PLACEHOLDERS = {
 
 
 def not_approved_text(text):
-    """The brief's "Not approved" paragraph or list, as one line. It runs to the
-    next field or heading; a blank line ends it unless a list item follows."""
+    """The brief's "Not approved" paragraph or list: one line per list item, with
+    wrapped lines joined. It runs to the next field or heading; a blank line ends
+    it unless a list item follows."""
     lines = text.splitlines()
     for index, line in enumerate(lines):
         label = NOT_APPROVED.match(line)
         if not label:
             continue
-        parts, rest = [label.group(1).strip()], lines[index + 1:]
+        items, rest = [label.group(1).strip()], lines[index + 1:]
         for position, following in enumerate(rest):
             if not following.strip():
                 upcoming = next((line for line in rest[position + 1:] if line.strip()), '')
-                if LIST_ITEM.match(upcoming) or not any(parts):
+                if LIST_ITEM.match(upcoming) or not any(items):
                     continue
                 break
             if FIELD.match(following) or following.lstrip().startswith('#'):
                 break
-            parts.append(following.strip())
-        return ' '.join(part for part in parts if part)
+            if LIST_ITEM.match(following) or not items[-1]:
+                items.append(following.strip())
+            else:
+                items[-1] += f' {following.strip()}'
+        return '\n'.join(item for item in items if item)
     return ''
 
 
@@ -199,26 +226,35 @@ def reserved_actions(text):
     placeholders = set(EARLIER_PLACEHOLDERS)
     with contextlib.suppress(OSError):
         placeholders.add(not_approved_text(TEMPLATE.read_text()))
-    if listed in placeholders or listed.strip('`*_ .').lower() in ('', 'none', 'nothing'):
+    if (listed in placeholders or NONE_FIRST.match(listed)
+            or listed.strip('`*_ .').lower() in ('', 'none', 'nothing')):
         return ''
     return listed
 
 
 def action_count(reserved):
-    """How many actions a "Not approved" text lists: list items, split further at
-    semicolons outside parentheses. Commas and "and" sit inside single actions
-    too often to split on."""
+    """How many actions a "Not approved" text lists: one per line (list item),
+    split further at semicolons outside parentheses. Commas and "and" sit inside
+    single actions too often to split on."""
     count = 0
-    for item in LIST_MARKER.split(reserved):
+    for item in reserved.splitlines():
         depth, part = 0, ''
-        for char in item + ';':
+        for char in item:
             depth = max(0, depth + {'(': 1, ')': -1}.get(char, 0))
             if char == ';' and depth == 0:
                 count += bool(part.strip(' .'))
                 part = ''
             else:
                 part += char
+        count += bool(part.strip(' .'))
     return max(1, count)
+
+
+def one_line(reserved):
+    """The listed actions joined for a message, without their list markers."""
+    items = [item[marker.end():] if (marker := LIST_ITEM.match(item)) else item
+             for item in reserved.splitlines()]
+    return '; '.join(item.strip().rstrip('.;') for item in items)
 
 
 def asks(message, count=1):
@@ -356,7 +392,7 @@ def stop(event, runtime=None):
         if (reserved and not asks(last_message, action_count(reserved))
                 and first_time(path, '.close-question', session_id, reserved)):
             return {'decision': 'block', 'reason': (
-                f'{path} lists reserved actions under "Not approved": {reserved.rstrip(".")}. '
+                f'{path} lists reserved actions under "Not approved": {one_line(reserved)}. '
                 'End your report with each one still open as a yes/no question to Sebastian '
                 'with your recommended answer, above all one his request left undecided. An '
                 'action leaves "Not approved" only once Sebastian has answered it: move it to '
@@ -459,7 +495,7 @@ def hold(path, text, items, session_id, runtime):
         return {'systemMessage': (
             f'Effort gate: the agent stopped {MAX_IDENTICAL_BLOCKS} times without progress. '
             f'{path} is now marked blocked; still open: {"; ".join(pending)}.'
-            + (f' Not approved, for you to decide: {reserved.rstrip(".")}.' if reserved else ''))}
+            + (f' Not approved, for you to decide: {one_line(reserved)}.' if reserved else ''))}
     if tasks and runtime in RUNTIMES_THAT_WAKE:
         return None
     if tasks:
@@ -490,7 +526,12 @@ def context(event):
 
 
 def main():
+    role = os.environ.get('AGENT_RUN_ROLE')
     if len(sys.argv) == 3 and sys.argv[1] in ('new', 'claim'):
+        if role:
+            sys.exit(f'effort-gate: this is a delegated {role} run (AGENT_RUN_ROLE). The effort '
+                     'file belongs to the orchestrator that started it: work its brief and end '
+                     'with your report.')
         (new if sys.argv[1] == 'new' else claim)(sys.argv[2])
         return 0
     runtime = sys.argv[2] if len(sys.argv) == 3 and sys.argv[1] == 'stop' else None
@@ -498,6 +539,8 @@ def main():
         print(__doc__, file=sys.stderr)
         return 2
     event = read_event()
+    if role:
+        return 0
     output = stop(event, runtime) if sys.argv[1] == 'stop' else context(event)
     if output:
         print(json.dumps(output))

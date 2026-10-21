@@ -26,6 +26,7 @@ time.sleep(float(os.environ.get('FAKE_SLEEP', '0')))
 prompt = sys.stdin.read()
 record = {'argv': sys.argv[1:], 'cwd': os.getcwd(), 'stdin': prompt,
           'claude_config_dir': os.environ.get('CLAUDE_CONFIG_DIR'),
+          'agent_run_role': os.environ.get('AGENT_RUN_ROLE'),
           'anthropic_api_key': 'ANTHROPIC_API_KEY' in os.environ,
           'claude_tokens': [name for name in ('ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN')
                             if name in os.environ]}
@@ -58,7 +59,8 @@ class AgentRun(unittest.TestCase):
         self.run_dir.mkdir(parents=True)
         (self.run_dir / 'prompt.md').write_text('Check the done-when items.\n')
         self.log = root / 'fake.json'
-        self.env = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}',
+        inherited = {k: v for k, v in os.environ.items() if k != 'AGENT_RUN_ROLE'}
+        self.env = {**inherited, 'PATH': f'{bin_dir}:{os.environ["PATH"]}',
                     'FAKE_LOG': str(self.log), 'ANTHROPIC_API_KEY': 'test-key',
                     'ANTHROPIC_AUTH_TOKEN': 'test-token', 'CLAUDE_CODE_OAUTH_TOKEN': 'test-oauth',
                     'CLAUDE_CONFIG_DIR': str(root / 'claude-home')}
@@ -164,6 +166,22 @@ class AgentRun(unittest.TestCase):
     def test_agent_failure_is_the_wait_exit_code(self):
         waited, _ = self.start_and_wait('claude', 'verify', FAKE_EXIT='3')
         self.assertEqual(waited.returncode, 3)
+
+    def test_runs_are_marked_delegated_except_a_continuation(self):
+        for role, expected in (('work', 'work'), ('verify', 'verify'), ('review', 'review'),
+                               ('continue', None)):
+            self.run_dir = self.run_dir.parent / role
+            self.run_dir.mkdir()
+            (self.run_dir / 'prompt.md').write_text('Go.\n')
+            _, seen = self.start_and_wait('codex', role)
+            self.assertEqual(seen['agent_run_role'], expected, role)
+
+    def test_a_delegated_run_cannot_start_another(self):
+        refused = self.agent_run('start', 'codex', 'review', str(self.run_dir), check=False,
+                                 AGENT_RUN_ROLE='work')
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('orchestrator', refused.stderr)
+        self.assertFalse((self.run_dir / 'command.json').exists())
 
     def test_refuses_a_run_folder_without_prompt_or_already_used(self):
         (self.run_dir / 'prompt.md').unlink()

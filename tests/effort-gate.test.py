@@ -81,13 +81,18 @@ class EffortGate(unittest.TestCase):
         if exit_code is not None:
             (run / 'exit').write_text(f'{exit_code}\n')
 
-    def run_gate(self, mode, cwd=None, event='Stop', session=None, runtime=None, last=None):
+    def run_gate(self, mode, cwd=None, event='Stop', session=None, runtime=None, last=None,
+                 role=None):
+        """Run a hook as the runtime would; `role` marks a run started by agent-run."""
         payload = {'session_id': session or self.session, 'cwd': str(cwd or self.repo),
                    'hook_event_name': event}
         if last is not None:
             payload['last_assistant_message'] = last
+        env = {k: v for k, v in os.environ.items() if k != 'AGENT_RUN_ROLE'}
+        if role:
+            env['AGENT_RUN_ROLE'] = role
         command = ['python3', str(GATE), mode, *([runtime] if runtime else [])]
-        result = subprocess.run(command, input=json.dumps(payload),
+        result = subprocess.run(command, input=json.dumps(payload), env=env,
                                 capture_output=True, text=True, check=True)
         return json.loads(result.stdout) if result.stdout.strip() else None
 
@@ -262,6 +267,14 @@ class EffortGate(unittest.TestCase):
     def test_text_after_none_is_still_a_reserved_action(self):
         self.write_effort(status='done', first='pass', not_approved='None yet: publishing to PyPI.')
         self.assertIn('publishing to PyPI', self.run_gate('stop', last='Done.')['reason'])
+
+    def test_text_after_a_leading_none_is_no_reserved_action(self):
+        for not_approved in ('None. Push and deploy stay with the owner.',
+                             '`None.` Pushing stays with the orchestrator.',
+                             'Nothing. Release is the owner\'s call.'):
+            self.session = str(uuid.uuid4())
+            self.write_effort(status='done', first='pass', not_approved=not_approved)
+            self.assertIsNone(self.run_gate('stop', last='Done.'), not_approved)
 
     def test_earlier_template_prompt_is_not_a_reserved_action(self):
         for not_approved in ('reserved actions that are still open.', '`None.`',
@@ -462,6 +475,19 @@ class EffortGate(unittest.TestCase):
             '**Not approved:** None.', '**Not approved:**\n\n- (Publish repository)\n- (Rotate key)'))
         self.assertEqual(self.run_gate('stop', last=one_question)['decision'], 'block')
 
+    def test_a_dash_inside_parentheses_stays_in_one_action(self):
+        path = self.write_effort(status='done', first='pass')
+        path.write_text(path.read_text().replace(
+            '**Not approved:** None.', '**Not approved:**\n\n- Publish preview (docs - public; examples)'))
+        self.assertIsNone(self.run_gate('stop', last='Done.\n\n- Go ahead? I recommend yes.'))
+
+    def test_an_unmatched_parenthesis_keeps_the_next_item(self):
+        path = self.write_effort(status='done', first='pass')
+        path.write_text(path.read_text().replace(
+            '**Not approved:** None.', '**Not approved:**\n\n- Publish guide for `(` tokens\n- Rotate key'))
+        self.assertEqual(self.run_gate('stop', last='Done.\n\n- Publish? I recommend yes.')['decision'],
+                         'block')
+
     def test_close_question_keeps_answered_actions_with_sebastian(self):
         self.write_effort(status='done', first='pass', not_approved='Going public.')
         reason = self.run_gate('stop', last='Done.')['reason']
@@ -496,6 +522,50 @@ class EffortGate(unittest.TestCase):
             self.assertIsNone(self.run_gate('stop', session=other))
         self.assertIsNone(self.run_gate('context', event='SessionStart', session=other))
         self.assertEqual(path.read_text(), before)
+
+    def worktree(self, name):
+        """A second worktree of the test repository, beside it."""
+        self.commit('2026-10-21T11:00:00+02:00')
+        path = self.repo.parent / name
+        subprocess.run(['git', '-C', str(self.repo), 'worktree', 'add', '-q', '-b', name, str(path)],
+                       check=True)
+        return path
+
+    def test_effort_in_another_worktree_of_the_repository_is_gated(self):
+        tree = self.worktree('feature')
+        main_effort = self.write_effort()
+        moved = tree / '.scratch' / 'example' / 'effort.md'
+        moved.parent.mkdir(parents=True)
+        moved.write_text(main_effort.read_text().replace(f'checkout: {self.repo}', f'checkout: {tree}'))
+        main_effort.unlink()
+        self.assertEqual(self.run_gate('stop')['decision'], 'block')
+        self.assertIn(str(moved), self.run_gate('context', event='SessionStart')
+                      ['hookSpecificOutput']['additionalContext'])
+
+    def test_copy_in_a_worktree_naming_another_checkout_is_ignored(self):
+        tree = self.worktree('feature')
+        copy = tree / '.scratch' / 'example' / 'effort.md'
+        copy.parent.mkdir(parents=True)
+        copy.write_text(self.write_effort().read_text())
+        (self.repo / '.scratch' / 'example' / 'effort.md').unlink()
+        self.assertIsNone(self.run_gate('stop', cwd=tree))
+
+    def test_a_delegated_run_is_never_gated(self):
+        for role in ('work', 'verify', 'review'):
+            self.write_effort(status='done', first='open', not_approved='Going public.')
+            self.assertIsNone(self.run_gate('stop', role=role), role)
+            self.assertIsNone(self.run_gate('context', event='SessionStart', role=role), role)
+
+    def test_a_delegated_run_cannot_create_or_claim_an_effort(self):
+        ids = {'CODEX_THREAD_ID': 'worker-thread', 'AGENT_RUN_ROLE': 'work'}
+        created = self.run_command('new', 'login', env_ids=ids)
+        self.assertNotEqual(created.returncode, 0)
+        self.assertIn('orchestrator', created.stderr)
+        self.assertFalse((self.repo / '.scratch' / 'login').exists())
+        path = self.write_effort()
+        claimed = self.run_command('claim', str(path), env_ids=ids)
+        self.assertNotEqual(claimed.returncode, 0)
+        self.assertIn(f'session: {self.session}\n', path.read_text())
 
     def test_effort_without_owner_is_not_gated(self):
         path = self.write_effort()
@@ -548,7 +618,8 @@ class EffortGate(unittest.TestCase):
     def run_command(self, *args, env_ids=None, runtime=None):
         """Run a subcommand as an agent shell would; `runtime` names the nearest
         agent process (a shell run through a symlink of that name)."""
-        env = {k: v for k, v in os.environ.items() if k not in ('CODEX_THREAD_ID', 'CLAUDE_CODE_SESSION_ID')}
+        env = {k: v for k, v in os.environ.items()
+               if k not in ('CODEX_THREAD_ID', 'CLAUDE_CODE_SESSION_ID', 'AGENT_RUN_ROLE')}
         env.update(env_ids or {})
         command = ['python3', str(GATE), *args]
         if runtime:

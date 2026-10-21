@@ -189,8 +189,10 @@ machine. Start a new agent session after installation.
   turn while the file has unfinished "done when" items; while a recorded task
   is `running`, Claude (which wakes the session when the task ends) may stop
   and Codex is asked for a blocking wait. As the post-compaction hook it points
-  the owner back at the file. Verifiers and workers in the same checkout are
-  not gated. `.scratch/` is kept out of git through the repository's
+  the owner back at the file, in any worktree of the repository. Other
+  sessions in the same checkout are not gated, and a run `agent-run` started
+  for an orchestrator is neither gated nor allowed to create or claim an
+  effort file. `.scratch/` is kept out of git through the repository's
   `info/exclude`. Hooks: `claude/settings.json`, `codex/hooks.json`
   (Codex asks once to trust new hooks via `/hooks`). A "done when" item marked
   `pass` on evidence labelled a substitute stays open, also in an effort set
@@ -204,7 +206,8 @@ machine. Start a new agent session after installation.
   `codex exec` or `claude -p` run for a role (`work`, `continue`, `verify`,
   `review`) with model, effort and access pinned, the prompt and results in a
   run folder, and `wait` blocks until it ends. Codex lanes start signed out of
-  Claude. Tests: `python3 tests/agent-run.test.py`.
+  Claude. Runs other than `continue` carry `AGENT_RUN_ROLE` and cannot start
+  further runs. Tests: `python3 tests/agent-run.test.py`.
 - **Tripwires.** [`bin/agent-tripwire`](bin/agent-tripwire), a PreToolUse hook
   in both runtimes, refuses `git push` with `--force`, `-f` or a `+refspec`
   wherever the flag sits; `--force-with-lease` stays allowed. Alongside it,

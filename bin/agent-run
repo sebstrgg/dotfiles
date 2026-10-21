@@ -21,6 +21,10 @@ Defaults: Codex `gpt-6.1-sol` at `high` (`xhigh` for review), Claude `opus` at
 the orchestrator spends Claude usage. Claude runs keep Sebastian's configured
 permission mode; verify and review runs have no edit tools.
 
+Runs other than `continue` carry AGENT_RUN_ROLE=<role>: they work their brief
+for the orchestrator, so `effort-gate` neither gates them nor lets them create
+or claim an effort file, and `agent-run start` refuses to start a run from one.
+
 The run folder receives command.json (what ran, for the record), events.jsonl,
 stderr.log, last.md and, when the agent exits, `exit` holding its exit code.
 """
@@ -59,6 +63,10 @@ def command(runtime, role, model, effort, run_dir):
 
 def environment(runtime, role, run_dir):
     env = dict(os.environ)
+    if role == 'continue':
+        env.pop('AGENT_RUN_ROLE', None)
+    else:
+        env['AGENT_RUN_ROLE'] = role
     if runtime == 'codex' and role != 'continue':
         signed_out = run_dir / 'claude-signed-out'
         signed_out.mkdir(exist_ok=True)
@@ -69,6 +77,10 @@ def environment(runtime, role, run_dir):
 
 
 def start(args):
+    if os.environ.get('AGENT_RUN_ROLE'):
+        sys.exit(f'agent-run: this is a delegated {os.environ["AGENT_RUN_ROLE"]} run '
+                 '(AGENT_RUN_ROLE). Further runs are the orchestrator\'s decision: name what '
+                 'you need in your report.')
     run_dir = Path(args.run_dir).expanduser().resolve()
     if not (run_dir / 'prompt.md').is_file():
         sys.exit(f'agent-run: {run_dir / "prompt.md"} is missing; write the prompt there first')

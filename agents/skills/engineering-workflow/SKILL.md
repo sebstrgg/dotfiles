@@ -13,12 +13,15 @@ unless a change is requested.
 
 ## 1. Intake
 
-- Gather context: repository instructions, docs and ADRs, and any active
-  `.scratch/*/effort.md` for this work. Taking an effort over (resuming or
-  continuing it): run `~/dotfiles/bin/effort-gate claim <file>` and continue
-  from its next step. A delegated agent (its prompt is a brief from an
-  orchestrator) works that brief and reports: it creates no effort file and
-  starts no review, verify or worker of its own; those are the orchestrator's.
+- Gather context: repository instructions, docs and ADRs, the documented
+  conventions of the closest existing sibling when you create a new one (host,
+  service, page), and any active `.scratch/*/effort.md` for this work. Taking
+  an effort over (resuming or continuing it): run
+  `~/dotfiles/bin/effort-gate claim <file>` and continue from its next step. A
+  delegated agent (its prompt is a brief from an orchestrator) works that brief
+  and ends on its report, which is its final message: it creates no effort file
+  and starts no review, verify or worker of its own; those are the
+  orchestrator's.
 - A quick change (global instructions, "How work runs") skips the effort
   file, planning and the fresh verifier: make it, check it once on the real
   target and report the evidence.
@@ -39,7 +42,10 @@ unless a change is requested.
   is the outcome.
 
 Intake is complete when the effort file holds the outcome, "done when" items
-checkable on the real target, the approvals given, and a budget.
+checkable on the real target, the approvals given, and a budget. A quality the
+request names (fast, optimised, secure) is a measured item; a change to
+persisted state has an item that the new build starts against a copy of the
+current production state.
 
 ## 2. Plan
 
