@@ -56,5 +56,7 @@
 - Docker: `docker compose -p <project> down --volumes --remove-orphans` for
   disposable test stacks, plus the images, volumes and networks created for
   them. Long-lived development data stays; name it in the report.
+- Backups and rollbacks: keep one verified rollback per service; once a new
+  deploy is verified, delete the older ones this work made.
 - Clean up only what this work created; report another session's leftovers to
   that session or to Sebastian.

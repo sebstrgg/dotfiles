@@ -16,8 +16,9 @@ unless a change is requested.
 - Gather context: repository instructions, docs and ADRs, and any active
   `.scratch/*/effort.md` for this work. Taking an effort over (resuming or
   continuing it): run `~/dotfiles/bin/effort-gate claim <file>` and continue
-  from its next step. A delegated agent works its brief and leaves the file to
-  its owner.
+  from its next step. A delegated agent (its prompt is a brief from an
+  orchestrator) works that brief and reports: it creates no effort file and
+  starts no review, verify or worker of its own; those are the orchestrator's.
 - A quick change (global instructions, "How work runs") skips the effort
   file, planning and the fresh verifier: make it, check it once on the real
   target and report the evidence.
@@ -75,6 +76,8 @@ check:
 
 1. Prove the change has the intended effect on the real target or real data,
    with the fastest decisive check, and record the evidence in the effort file.
+   For UI that is a visual pass of the rendered app against the version it
+   replaces: passing tests only say it is time for that pass.
 2. Code where a missed bug is expensive (security, auth or secrets, persisted
    data, migrations or deletion, concurrency, paid calls, public contracts, a
    large cross-module change) gets one cross-family review

@@ -543,6 +543,7 @@ class EffortGate(unittest.TestCase):
         self.assertEqual(output['hookEventName'], 'SessionStart')
         self.assertIn(str(path), output['additionalContext'])
         self.assertIn('#1 Login works', output['additionalContext'])
+        self.assertIn('engineering-workflow/SKILL.md again', output['additionalContext'])
 
     def run_command(self, *args, env_ids=None, runtime=None):
         """Run a subcommand as an agent shell would; `runtime` names the nearest

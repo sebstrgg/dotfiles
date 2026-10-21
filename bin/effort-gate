@@ -45,6 +45,7 @@ from datetime import datetime
 from pathlib import Path
 
 MAX_IDENTICAL_BLOCKS = 5
+SKILLS = Path(__file__).resolve().parent.parent / 'agents' / 'skills'
 TEMPLATE = (Path(__file__).resolve().parents[1]
             / 'agents' / 'skills' / 'engineering-workflow' / 'templates' / 'effort.md')
 SESSION_VARIABLES = {'codex': 'CODEX_THREAD_ID', 'claude': 'CLAUDE_CODE_SESSION_ID'}
@@ -481,7 +482,9 @@ def context(event):
         return None
     items = open_items(text)
     message = (f'Active effort file: {path}. Re-read it now and resume from its Next section. '
-               f'Open items: {"; ".join(items) if items else "none"}.')
+               f'Open items: {"; ".join(items) if items else "none"}. Skills loaded before '
+               f'compaction may be older than their files: read {SKILLS}/engineering-workflow/'
+               'SKILL.md again, and any other skill you are following.')
     return {'hookSpecificOutput': {'hookEventName': event.get('hook_event_name', 'SessionStart'),
                                    'additionalContext': message}}
 
