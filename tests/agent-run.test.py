@@ -18,8 +18,10 @@ AGENT_RUN = Path(__file__).resolve().parents[1] / 'bin' / 'agent-run'
 FAKE = r'''#!/usr/bin/env python3
 import json, os, sys, time
 if os.environ.get('FAKE_PID'):
+    import subprocess
+    helper = subprocess.Popen(['sleep', '30'])
     with open(os.environ['FAKE_PID'], 'w') as pid:
-        pid.write(str(os.getpid()))
+        pid.write(f'{os.getpid()} {helper.pid}')
 time.sleep(float(os.environ.get('FAKE_SLEEP', '0')))
 prompt = sys.stdin.read()
 record = {'argv': sys.argv[1:], 'cwd': os.getcwd(), 'stdin': prompt,
@@ -138,19 +140,26 @@ class AgentRun(unittest.TestCase):
         waited = self.agent_run('wait', str(self.run_dir))
         self.assertIn('verdict: pass', waited.stdout)
 
-    def test_stopping_the_run_stops_the_agent_and_still_marks_the_exit(self):
-        child_pid = self.run_dir.parent / 'child.pid'
+    def test_stopping_the_run_stops_the_agent_and_its_children(self):
+        pids = self.run_dir.parent / 'agent.pids'
         self.agent_run('start', 'codex', 'verify', str(self.run_dir), FAKE_SLEEP='30',
-                       FAKE_PID=str(child_pid))
+                       FAKE_PID=str(pids))
         for _ in range(50):
-            if child_pid.exists() and child_pid.read_text():
+            if pids.exists() and len(pids.read_text().split()) == 2:
                 break
             time.sleep(0.1)
         os.kill(int((self.run_dir / 'pid').read_text()), signal.SIGTERM)
         waited = self.agent_run('wait', str(self.run_dir), check=False)
         self.assertEqual(waited.returncode, 128 + signal.SIGTERM)
-        with self.assertRaises(ProcessLookupError):
-            os.kill(int(child_pid.read_text()), 0)
+        for pid in map(int, pids.read_text().split()):
+            for _ in range(20):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.1)
+            else:
+                self.fail(f'process {pid} of the stopped run is still alive')
 
     def test_agent_failure_is_the_wait_exit_code(self):
         waited, _ = self.start_and_wait('claude', 'verify', FAKE_EXIT='3')

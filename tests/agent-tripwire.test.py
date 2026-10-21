@@ -45,7 +45,15 @@ class AgentTripwire(unittest.TestCase):
                         'if true; then git push --force origin main; fi',
                         'for r in a b; do git push -f "$r" main; done',
                         'git status # check first\ngit push --force origin main',
-                        "cat <<'EOF' > notes.txt\nit's fine\nEOF\ngit push --force origin main"):
+                        "cat <<'EOF' > notes.txt\nit's fine\nEOF\ngit push --force origin main",
+                        'git push --fo\\\nrce origin main',
+                        'env -u GIT_TRACE git push -f origin main',
+                        'sudo -u deploy git push --force origin main',
+                        "printf '%s\\n' 'Use <<EOF for examples'\ngit push --force origin main",
+                        "git push -o '#build' --force origin main",
+                        'echo `git push -f`',
+                        'echo "$(git push --force origin main)"',
+                        'git commit -m "$(cat <<\'EOF\'\nIt\'s done (mostly)\nEOF\n)" && git push -f'):
             self.assertEqual(decide(command), 'deny', command)
 
     def test_ordinary_and_lease_protected_pushes_are_allowed(self):
@@ -61,6 +69,11 @@ class AgentTripwire(unittest.TestCase):
                         'git push origin main -o +ci.skip',
                         'git push --push-option +x origin main',
                         'git push origin main  # never --force here',
+                        'echo ok # example; git push --force is forbidden',
+                        'command -p git push origin main',
+                        "git commit -m 'Explain <<EOF and why git push --force is wrong'",
+                        'git commit -m "$(cat <<\'EOF\'\nIt\'s done (mostly)\ngit push --force was wrong\nEOF\n)" && git push',
+                        'echo "$(grep -c \'"x":"[^"]*"\' f)" && git push origin main',
                         "git commit -F - <<'EOF'\nExplain why\ngit push --force was wrong\nEOF",
                         'git log --format=%s -f',
                         'echo "never git push --force"',

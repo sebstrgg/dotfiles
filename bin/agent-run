@@ -25,6 +25,7 @@ The run folder receives command.json (what ran, for the record), events.jsonl,
 stderr.log, last.md and, when the agent exits, `exit` holding its exit code.
 """
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -95,8 +96,8 @@ def start(args):
 
 def supervise(run_dir):
     """Run the agent with the prompt on stdin, then write last.md and the exit marker.
-    A signal that stops this supervisor is passed on to the agent, so stopping the
-    recorded pid stops the run and still leaves an exit marker."""
+    A signal that stops this supervisor is passed on to the agent's process group,
+    so stopping the recorded pid stops the run and still leaves an exit marker."""
     record = json.loads((run_dir / 'command.json').read_text())
     code = 127
     try:
@@ -104,9 +105,14 @@ def supervise(run_dir):
               (run_dir / 'events.jsonl').open('w') as stdout,
               (run_dir / 'stderr.log').open('w') as stderr):
             agent = subprocess.Popen(record['argv'], cwd=record['cwd'], stdin=stdin,
-                                     stdout=stdout, stderr=stderr)
+                                     stdout=stdout, stderr=stderr, process_group=0)
+
+            def pass_on(received, _frame):
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(agent.pid, received)
+
             for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-                signal.signal(signum, lambda received, _frame: agent.send_signal(received))
+                signal.signal(signum, pass_on)
             code = agent.wait()
             code = 128 - code if code < 0 else code
         if record['runtime'] == 'claude':
