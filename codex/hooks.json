@@ -1,5 +1,8 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {"hooks": [{"type": "command", "command": "python3 ~/dotfiles/bin/agent-tripwire", "timeout": 10}]}
+    ],
     "Stop": [
       {"hooks": [{"type": "command", "command": "python3 ~/dotfiles/bin/effort-gate stop", "timeout": 10}]}
     ],

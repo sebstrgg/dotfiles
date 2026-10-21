@@ -135,6 +135,7 @@ if command -v jq &>/dev/null && [[ -f "$_cs" ]]; then
         and ([.hooks.Stop[]?.hooks[]?.command] | any(test("effort-gate stop claude")))
         and ([.hooks.SessionStart[]? | select(.matcher == "compact") | .hooks[]?.command]
              | any(test("effort-gate context")))
+        and ([.hooks.PreToolUse[]?.hooks[]?.command] | any(test("agent-tripwire")))
         and (.permissions.deny | index("Bash(git push --force:*)") != null)' "$_cs" >/dev/null; then
         ok "$_cs: effort hooks, memory off, compaction window, tripwires"
     else
@@ -174,9 +175,9 @@ if [[ "$PLATFORM" == "Darwin" ]]; then check_cmd brew; else check_cmd rbw; fi
 hdr "Portability scan (tracked files)"
 if git -C "$REPO_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
     _hits=$(git -C "$REPO_DIR" grep -nE '/Users/[^/"]+|/home/[^/"]+' -- . \
-        ':(exclude)*.md' ':(exclude)*.example' ':(exclude)*.backup.*' 2>/dev/null || true)
+        ':(exclude)*.md' ':(exclude)*.example' ':(exclude)*.backup.*' ':(exclude)scripts/doctor.sh' 2>/dev/null || true)
     if [[ -n "$_hits" ]]; then
-        echo "$_hits" | while IFS= read -r _line; do warn "hardcoded path: ${_line#"$REPO_DIR"/}"; done
+        while IFS= read -r _line; do warn "hardcoded path: ${_line#"$REPO_DIR"/}"; done <<<"$_hits"
         echo -e "  ${DIM}Move machine-specific blocks into ~/.zshrc.local (gitignored).${NC}"
     else ok "no /Users or /home paths in tracked files"
     fi

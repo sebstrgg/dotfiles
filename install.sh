@@ -475,7 +475,7 @@ if [[ -f "$SCRIPT_DIR/agents/global-instructions.md" ]]; then
 else
     warn "Private policy absent: restore agents/global-instructions.md, then re-run"
 fi
-# Codex hooks (effort gate) and tripwire rules. New hooks need trusting once in
+# Codex hooks (effort gate, force-push tripwire) and tripwire rules. New hooks need trusting once in
 # Codex via /hooks. The rules file is copied: Codex skips symlinked .rules files,
 # and writes its own approvals to rules/default.rules.
 mkdir -p "$HOME/.codex/rules"

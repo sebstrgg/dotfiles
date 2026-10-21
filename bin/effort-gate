@@ -18,8 +18,9 @@ marks the effort `blocked`, records why under "## Blockers" and warns the user.
 A row under "## Running tasks" whose state says `running` means the agent waits on
 a job. Claude Code wakes a session when its background task ends, so its Stop hook
 passes `claude` and the gate lets that session end its turn. Codex has no such
-wake-up: the gate holds the session and asks for a blocking wait, without counting
-the stop as a stall.
+wake-up: the gate holds the session and asks for a blocking wait. These stops count
+toward the cap too, so a stale `running` row ends in `blocked` rather than holding
+or freeing the session forever; any change to an item or task row is progress.
 """
 import hashlib
 import json
@@ -91,10 +92,21 @@ def table(text, section):
 
 def open_items(text):
     """Rows of the "Done when" table not yet `pass` or `blocked`: any other status,
-    including `fail` or a misspelling, keeps the item open."""
-    return [f"#{row.get('#', '?')} {row.get('item', '').strip()}".strip()
-            for row in table(text, 'done when')
-            if row.get('status', '').strip('`* ').lower() not in FINISHED]
+    including `fail` or a misspelling, keeps the item open. So does a `pass` whose
+    evidence names a substitute check: a substitute never closes an item."""
+    items = []
+    for row in table(text, 'done when'):
+        name = f"#{row.get('#', '?')} {row.get('item', '').strip()}".strip()
+        status = row.get('status', '').strip('`* ').lower()
+        if status == 'pass' and re.search(r'\bsubstitute', row.get('evidence', ''), re.IGNORECASE):
+            items.append(f'{name} (substitute evidence)')
+        elif status not in FINISHED:
+            items.append(name)
+    return items
+
+
+def table_rows(text, section):
+    return ['|'.join(row.values()) for row in table(text, section)]
 
 
 def running_tasks(text):
@@ -208,17 +220,11 @@ def stop(event, runtime=None):
         return None
     items = open_items(text)
     counter = counter_path(session_id)
-    tasks = running_tasks(text)
-    if not items or tasks:
+    if not items:
         counter.unlink(missing_ok=True)
-    if not items or (tasks and runtime in RUNTIMES_THAT_WAKE):
         return None
-    if tasks:
-        return {'decision': 'block', 'reason': (
-            f'{path} records a running task: {"; ".join(tasks)}. Wait for it with one blocking '
-            'wait on its completion (its process or exit marker), then continue. If it has '
-            'already finished, record that and continue.')}
-    signature = hashlib.sha256('\n'.join(items).encode()).hexdigest()
+    tasks = running_tasks(text)
+    signature = hashlib.sha256('\n'.join(items + table_rows(text, 'running tasks')).encode()).hexdigest()
     try:
         previous, count = counter.read_text().split()
         count = int(count) if previous == signature else 0
@@ -232,10 +238,18 @@ def stop(event, runtime=None):
             f'{path} is now marked blocked; still open: {"; ".join(items)}.')}
     counter.parent.mkdir(parents=True, exist_ok=True)
     counter.write_text(f'{signature} {count + 1}')
+    if tasks and runtime in RUNTIMES_THAT_WAKE:
+        return None
+    if tasks:
+        return {'decision': 'block', 'reason': (
+            f'{path} records a running task: {"; ".join(tasks)}. Wait for it with one blocking '
+            'wait on its completion (its process or exit marker), then continue. If it has '
+            'already finished, record that and continue.')}
     return {'decision': 'block', 'reason': (
         f'{path} has "done when" items not yet `pass`: {"; ".join(items)}. '
         'Continue the work. An item becomes `pass` when a fresh `verify` run from the other '
-        'model family (see `delegate`) passes it on the real target. If you cannot proceed, '
+        'model family (`~/dotfiles/bin/agent-run`, see `delegate`) passes it on the real target; a '
+        'substitute check never makes an item `pass`. If you cannot proceed, '
         'record the blocker and set `status: blocked`; once every item passes, set '
         '`status: done`. End with a report of the work to Sebastian.')}
 

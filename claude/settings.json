@@ -33,11 +33,6 @@
     "deny": [
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
-      "Bash(git *push * --force)",
-      "Bash(git *push * --force *)",
-      "Bash(git *push * -f)",
-      "Bash(git *push * -f *)",
-      "Bash(git *push * +*)",
       "Bash(gh repo delete:*)",
       "Bash(gh repo edit:*)",
       "Bash(gh repo rename:*)",
@@ -89,6 +84,18 @@
           {
             "type": "command",
             "command": "python3 ~/dotfiles/bin/effort-gate stop claude",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/dotfiles/bin/agent-tripwire",
             "timeout": 10
           }
         ]

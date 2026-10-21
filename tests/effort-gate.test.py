@@ -23,7 +23,7 @@ session: {session}
 
 | # | Item | Check on the real target | Status | Evidence |
 |---|---|---|---|---|
-| 1 | Login works | real browser | {first} | |
+| 1 | Login works | real browser | {first} | {evidence} |
 | 2 | Logout works | real browser | pass | screenshot |
 
 ## Blockers
@@ -53,11 +53,12 @@ class EffortGate(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def write_effort(self, status='active', first='open', checkout=None, task=''):
+    def write_effort(self, status='active', first='open', checkout=None, task='', evidence=''):
         path = self.repo / '.scratch' / 'example' / 'effort.md'
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(EFFORT.format(status=status, first=first, checkout=checkout or self.repo,
-                                      session=self.session, task=task))
+                                      session=self.session, task=task,
+                                      evidence=evidence))
         return path
 
     def run_gate(self, mode, cwd=None, event='Stop', session=None, runtime=None):
@@ -86,16 +87,30 @@ class EffortGate(unittest.TestCase):
 
     def test_running_task_lets_a_runtime_that_wakes_on_it_stop(self):
         self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
-        for _ in range(7):
+        for _ in range(5):
             self.assertIsNone(self.run_gate('stop', runtime='claude'))
 
-    def test_running_task_holds_other_runtimes_without_counting_a_stall(self):
-        path = self.write_effort(task='| Export | codex exec | run-7 | main | running since 09:10 |')
-        outputs = [self.run_gate('stop') for _ in range(7)]
-        self.assertTrue(all(o['decision'] == 'block' for o in outputs))
-        self.assertIn('Export', outputs[-1]['reason'])
-        self.assertIn('blocking wait', outputs[-1]['reason'])
-        self.assertIn('status: active', path.read_text())
+    def test_running_task_holds_other_runtimes_for_a_blocking_wait(self):
+        self.write_effort(task='| Export | codex exec | run-7 | main | running since 09:10 |')
+        output = self.run_gate('stop')
+        self.assertEqual(output['decision'], 'block')
+        self.assertIn('Export', output['reason'])
+        self.assertIn('blocking wait', output['reason'])
+
+    def test_stale_running_task_still_ends_in_blocked(self):
+        for runtime in ('claude', None):
+            self.session = str(uuid.uuid4())
+            path = self.write_effort(task='| Export | Bash | bg-1 | main | running |')
+            outputs = [self.run_gate('stop', runtime=runtime) for _ in range(6)]
+            self.assertIn('marked blocked', outputs[5]['systemMessage'], runtime)
+            self.assertIn('status: blocked', path.read_text(), runtime)
+
+    def test_a_task_changing_state_counts_as_progress(self):
+        path = self.write_effort(task='| Export | codex exec | run-7 | main | running |')
+        for _ in range(5):
+            self.run_gate('stop')
+        path.write_text(path.read_text().replace('| running |', '| running, 80% |'))
+        self.assertEqual(self.run_gate('stop')['decision'], 'block')
 
     def test_finished_task_does_not_count_as_running(self):
         self.write_effort(task='| Export | Bash | bg-1 | main | finished |')
@@ -109,6 +124,17 @@ class EffortGate(unittest.TestCase):
 
     def test_all_passed_allows_stop(self):
         self.write_effort(first='pass')
+        self.assertIsNone(self.run_gate('stop'))
+
+    def test_pass_backed_only_by_a_substitute_stays_open(self):
+        self.write_effort(first='pass', evidence='Substitute: mocked API, live endpoint unreachable')
+        output = self.run_gate('stop')
+        self.assertEqual(output['decision'], 'block')
+        self.assertIn('#1 Login works (substitute evidence)', output['reason'])
+        self.assertIn('substitute check never makes an item `pass`', output['reason'])
+
+    def test_blocked_item_with_substitute_evidence_allows_stop(self):
+        self.write_effort(first='blocked', evidence='substitute only; needs the live API key')
         self.assertIsNone(self.run_gate('stop'))
 
     def test_failed_or_unknown_status_blocks_stop(self):

@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""PreToolUse hook for Claude Code and Codex: refuse a force-push.
+
+Reads the hook event on stdin. For a shell command that runs `git push` with
+`--force`, `-f` (alone or in a short-flag group) or a `+refspec`, it prints a
+deny decision; every other call passes silently. `--force-with-lease` and
+`--force-if-includes` stay allowed: they refuse to overwrite work the agent has
+not fetched.
+
+Permission rules match command text by position, so a force flag after the
+remote, or `git -C <dir>` in front, slipped past them; this reads the words of
+each simple command instead. It is a tripwire, not a boundary: a push hidden in
+`sh -c`, a script or an alias still runs.
+"""
+import json
+import re
+import shlex
+import sys
+
+SEPARATORS = {'&&', '||', ';', '|', '&', '|&', '(', ')'}
+GIT_OPTIONS_WITH_VALUE = {'-C', '-c', '--git-dir', '--work-tree', '--namespace'}
+WRAPPERS = {'command', 'exec', 'nohup', 'time', 'env', 'sudo'}
+ASSIGNMENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*=')
+SHORT_FORCE = re.compile(r'-[A-Za-z]*f[A-Za-z]*')
+
+
+def simple_commands(command):
+    """Word lists of each simple command, split at shell operators and newlines."""
+    for line in command.splitlines():
+        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        words = []
+        for token in lexer:
+            if token in SEPARATORS:
+                yield words
+                words = []
+            else:
+                words.append(token)
+        yield words
+
+
+def strip_prefix(words):
+    """Drop leading variable assignments and wrappers such as `timeout 30`."""
+    while words:
+        if ASSIGNMENT.match(words[0]) or words[0] in WRAPPERS:
+            words = words[1:]
+        elif words[0] in ('timeout', 'nice'):
+            words = words[1:]
+            while words and (words[0].startswith('-') or words[0][:1].isdigit()):
+                words = words[1:]
+        else:
+            return words
+    return words
+
+
+def force_push(words):
+    words = strip_prefix(words)
+    if not words or words[0].rsplit('/', 1)[-1] != 'git':
+        return False
+    rest = words[1:]
+    while rest and rest[0].startswith('-'):
+        rest = rest[2:] if rest[0] in GIT_OPTIONS_WITH_VALUE else rest[1:]
+    if not rest or rest[0] != 'push':
+        return False
+    for word in rest[1:]:
+        if word == '--force' or SHORT_FORCE.fullmatch(word) or word.startswith('+'):
+            return True
+    return False
+
+
+def shell_text(command):
+    """Codex may pass argv (`["bash", "-lc", "<script>"]`); Claude passes a string."""
+    if isinstance(command, list):
+        if len(command) >= 3 and command[1] in ('-c', '-lc'):
+            return str(command[2])
+        return shlex.join(str(word) for word in command)
+    return str(command or '')
+
+
+def main():
+    try:
+        event = json.loads(sys.stdin.read() or '{}')
+    except ValueError:
+        return 0
+    if not isinstance(event, dict) or event.get('tool_name') != 'Bash':
+        return 0
+    try:
+        commands = list(simple_commands(shell_text((event.get('tool_input') or {}).get('command'))))
+    except ValueError:
+        return 0
+    if any(force_push(words) for words in commands):
+        print(json.dumps({'hookSpecificOutput': {
+            'hookEventName': 'PreToolUse',
+            'permissionDecision': 'deny',
+            'permissionDecisionReason': (
+                'Force-push rewrites remote history. On your own branch use '
+                '--force-with-lease; anything else needs Sebastian.')}}))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
