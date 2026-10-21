@@ -34,9 +34,10 @@ WRAPPERS = {  # wrapper -> its options that take a value
 CONTROL_WORDS = {'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{', '--'}
 ASSIGNMENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*=')
 PS_ARGUMENT_FIELDS = {'args', 'command', 'cmd'}
-PS_UNIX_ADDS_ARGUMENTS = set('EFOfjlv')  # formats with a command column, or the environment
-PS_BSD_ADDS_ARGUMENTS = set('Oejlsuv')
-PS_OPTIONS_WITH_VALUE = set('CGUgptu')
+PS_ADDS_ARGUMENTS = set('EFMOfjlv')  # formats with a command column, or the environment
+PS_LEGACY_ADDS_ARGUMENTS = PS_ADDS_ARGUMENTS | set('Xesu')
+PS_OPTIONS_WITH_VALUE = set('GUgoptu')
+PS_LEGACY_OPTIONS_WITH_VALUE = set('GUopt')  # macOS legacy mode: `-g` takes none, `-u` is a format
 PGREP_OPTIONS_WITH_VALUE = set('FGMNPUdgrstu')
 
 
@@ -223,24 +224,34 @@ def lists_arguments(words):
         return 'a' in flags or {'l', 'f'} <= flags
     if name != 'ps':
         return False
-    formats = []
+    arguments = words[1:]
+    # macOS reads the whole call in legacy (BSD) mode when its first argument has no dash.
+    legacy = bool(arguments) and not arguments[0].startswith('-')
+    formats, rest = [], iter(arguments)
     for word in rest:
         if word.startswith('--'):
             option, has_value, value = word.partition('=')
             if option == '--format':
                 formats.append(value if has_value else next(rest, ''))
-        elif word.startswith('-') or word.isalpha():  # Unix flags, or a BSD group such as `aux`
-            unix = word.startswith('-')
-            letters = word.lstrip('-')
-            for position, letter in enumerate(letters, start=1):
-                if letter in (PS_UNIX_ADDS_ARGUMENTS if unix else PS_BSD_ADDS_ARGUMENTS):
-                    return True
-                if letter == 'o' or (unix and letter in PS_OPTIONS_WITH_VALUE):
-                    value = letters[position:] or next(rest, '')
-                    if letter == 'o':
-                        formats.append(value)
-                    break
-    fields = {field.partition('=')[0] for value in formats for field in re.split(r'[,\s]+', value)}
+            continue
+        bare = not word.startswith('-')
+        if bare and not word[:1].isalpha():
+            continue  # a process ID
+        adds = PS_LEGACY_ADDS_ARGUMENTS if legacy or bare else PS_ADDS_ARGUMENTS
+        takes_value = PS_LEGACY_OPTIONS_WITH_VALUE if legacy or bare else PS_OPTIONS_WITH_VALUE
+        letters = word.lstrip('-')
+        for position, letter in enumerate(letters, start=1):
+            if letter in adds:
+                return True
+            if letter in takes_value:
+                value = letters[position:] or next(rest, '')
+                if letter == 'o':
+                    formats.append(value)
+                break
+            if not letter.isalpha():
+                break
+    fields = {field.partition('=')[0].partition(':')[0]
+              for value in formats for field in re.split(r'[,\s]+', value)}
     return not formats or bool(fields & PS_ARGUMENT_FIELDS)
 
 
