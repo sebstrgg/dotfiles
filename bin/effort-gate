@@ -25,8 +25,8 @@ or freeing the session forever; any change to an item or task row is progress.
 
 When the owner ends a turn on a finished effort (status `done` or `blocked`, or
 every item passed with nothing running) whose brief still lists reserved actions
-under "Not approved", and its last message asks nothing, the gate holds it once
-to ask each one as a yes/no question. A marker beside the effort file keeps it to
+under "Not approved", and its last message asks fewer questions than it lists
+actions, the gate holds it once to ask each one as a yes/no question. A marker beside the effort file keeps it to
 once per owner and list.
 """
 import contextlib
@@ -190,15 +190,22 @@ def reserved_actions(text):
     return listed
 
 
-def asks(message):
-    """Whether a message ends asking something: a `?` in one of its last lines,
-    outside links and code."""
+def action_count(reserved):
+    """How many actions a "Not approved" text lists, counting generously: list
+    items, and parts split at semicolons, commas and "and"."""
+    parts = re.split(r';|,|\band\b|(?:^|\s)(?:[-*+]|\d+[.)])\s', reserved)
+    return max(1, sum(1 for part in parts if part.strip(' .')))
+
+
+def asks(message, count=1):
+    """Whether a message ends asking at least `count` questions: `?` marks in its
+    last lines, outside links and code."""
     if not isinstance(message, str):
         return False
     prose = re.sub(r'```.*?(?:```|\Z)', '', message, flags=re.DOTALL)
     lines = [LINK.sub('', re.sub(r'`[^`]*`', '', line)) for line in prose.splitlines()
              if line.strip()]
-    return any('?' in line for line in lines[-5:])
+    return sum(line.count('?') for line in lines[-(count + 4):]) >= count
 
 
 def closing(text, status):
@@ -301,16 +308,15 @@ def stop(event, runtime=None):
     if not efforts:
         return None
     for path, text, status in efforts:
-        items = open_items(text) if status in GATED else []
-        if items:
-            return hold(path, text, items, session_id, runtime)
+        if status in GATED and (open_items(text) or running_tasks(text)):
+            return hold(path, text, open_items(text), session_id, runtime)
     with contextlib.suppress(OSError):
         counter_path(session_id).unlink(missing_ok=True)
-    if asks(event.get('last_assistant_message')):
-        return None
+    last_message = event.get('last_assistant_message')
     for path, text, status in efforts:
         reserved = reserved_actions(text) if closing(text, status) else ''
-        if reserved and first_close_question(path, session_id, reserved):
+        if (reserved and not asks(last_message, action_count(reserved))
+                and first_close_question(path, session_id, reserved)):
             return {'decision': 'block', 'reason': (
                 f'{path} lists reserved actions under "Not approved": {reserved.rstrip(".")}. '
                 'End your report with each one still open as a yes/no question to Sebastian '
@@ -357,8 +363,10 @@ def stops_without_progress(session_id, signature):
 
 
 def hold(path, text, items, session_id, runtime):
-    """Block the owner's stop while items are open, until the stall cap marks it blocked."""
+    """Block the owner's stop while items are open or a task runs, until the stall
+    cap marks the effort blocked."""
     tasks = running_tasks(text)
+    pending = items or [f'{task} (running)' for task in tasks]
     rows = table_rows(text, 'done when') + table_rows(text, 'running tasks')
     signature = hashlib.sha256('\n'.join(rows).encode()).hexdigest()
     try:
@@ -366,13 +374,13 @@ def hold(path, text, items, session_id, runtime):
     except OSError:
         return {'systemMessage': (
             f'Effort gate: cannot keep its stop counter, so it is not holding the session. '
-            f'{path} still has open items: {"; ".join(items)}.')}
+            f'{path} still has open work: {"; ".join(pending)}.')}
     if count >= MAX_IDENTICAL_BLOCKS:
-        mark_blocked(path, text, items)
+        mark_blocked(path, text, pending)
         reserved = reserved_actions(text)
         return {'systemMessage': (
             f'Effort gate: the agent stopped {MAX_IDENTICAL_BLOCKS} times without progress. '
-            f'{path} is now marked blocked; still open: {"; ".join(items)}.'
+            f'{path} is now marked blocked; still open: {"; ".join(pending)}.'
             + (f' Not approved, for you to decide: {reserved.rstrip(".")}.' if reserved else ''))}
     if tasks and runtime in RUNTIMES_THAT_WAKE:
         return None

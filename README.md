@@ -213,6 +213,8 @@ machine. Start a new agent session after installation.
   push hidden in a script or `sh -c`: a tripwire, not a boundary. Codex ignores
   symlinked rule files, so the installer copies this one. Tests:
   `python3 tests/agent-tripwire.test.py`.
+- **Clock.** A UserPromptSubmit hook in both runtimes adds the Stockholm local
+  time to each prompt, so ETAs start from the real clock.
 - `bin/agent-messages --days N` lists Sebastian's own messages from local
   Claude and Codex sessions, for the weekly review.
 

@@ -328,6 +328,26 @@ class EffortGate(unittest.TestCase):
         finally:
             counter.rmdir()
 
+    def test_job_running_after_every_item_passed_still_waits(self):
+        self.write_effort(first='pass', task='| Deploy | codex exec | run-8 | main | running |')
+        output = self.run_gate('stop')
+        self.assertEqual(output['decision'], 'block')
+        self.assertIn('blocking wait', output['reason'])
+        self.assertIsNone(self.run_gate('stop', runtime='claude', last='Waiting for the deploy.'))
+
+    def test_one_question_does_not_cover_two_actions(self):
+        self.write_effort(status='done', first='pass',
+                          not_approved='Going public; rotating the exposed key.')
+        last = 'Done.\n\nMake the repository public? I recommend no.'
+        self.assertEqual(self.run_gate('stop', last=last)['decision'], 'block')
+
+    def test_a_question_per_action_closes(self):
+        self.write_effort(status='done', first='pass',
+                          not_approved='Going public; rotating the exposed key.')
+        last = ('Done.\n\n- Make the repository public? I recommend no.\n'
+                '- Rotate the key exposed in app.py (commit 1a2b3c4)? I recommend yes.')
+        self.assertIsNone(self.run_gate('stop', last=last))
+
     def test_waiting_mid_effort_is_not_a_close(self):
         self.write_effort(task='| Export | Bash | bg-1 | main | running |',
                           not_approved='Going public.')

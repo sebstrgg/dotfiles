@@ -61,10 +61,12 @@ diagnosis Sol couldn't crack, and cross-family review.
 
 ## Verification and review
 
-- `verify` runs in a fresh agent, from the other model family where the target
-  is reachable from it: a Claude orchestrator sends it to Codex, a Codex
-  orchestrator to Claude, both through `agent-run`. A subagent that forks the
-  orchestrator's context is not fresh.
+- `verify` runs in a fresh agent from the other model family: a Claude
+  orchestrator sends it to Codex, a Codex orchestrator to Claude, both through
+  `agent-run`. A same-family verify counts only when the target is out of the
+  other family's reach; when that family itself cannot run (signed out, usage
+  limit), the items stay open until it can, or go `blocked`. A subagent that
+  forks the orchestrator's context is not fresh.
 - Cross-family code review for expensive-to-miss code: Codex reviews
   Claude-written code, Claude reviews Codex-written code. Fix confirmed findings
   and re-check once.

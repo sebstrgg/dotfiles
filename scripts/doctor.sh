@@ -136,8 +136,9 @@ if command -v jq &>/dev/null && [[ -f "$_cs" ]]; then
         and ([.hooks.SessionStart[]? | select(.matcher == "compact") | .hooks[]?.command]
              | any(test("effort-gate context")))
         and ([.hooks.PreToolUse[]?.hooks[]?.command] | any(test("agent-tripwire")))
+        and ([.hooks.UserPromptSubmit[]?.hooks[]?.command] | any(test("Local time")))
         and (.permissions.deny | index("Bash(git push --force:*)") != null)' "$_cs" >/dev/null; then
-        ok "$_cs: effort hooks, memory off, compaction window, tripwires"
+        ok "$_cs: effort hooks, clock, memory off, compaction window, tripwires"
     else
         bad "$_cs: an agent-setup key is missing (compare with claude/settings.json)"
     fi
