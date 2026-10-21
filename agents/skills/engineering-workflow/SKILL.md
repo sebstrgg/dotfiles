@@ -101,7 +101,9 @@ again. Verification is complete when every item passes.
 - Remove the worktrees, branches, containers and background jobs this work
   created.
 - Report the outcome, the evidence, decisions worth knowing, and what
-  Sebastian needs to do.
+  Sebastian needs to do. Each reserved action still under "Not approved" in
+  the brief ends the report as a question to him, with your recommendation,
+  even when all local work is done.
 - After substantial rework, an escaped defect or repeated steering: `retro`,
   then fix the environment (a check, a tool, or one rule) rather than adding
   prose.
@@ -109,7 +111,8 @@ again. Verification is complete when every item passes.
 ## Staying on course
 
 - The stop gate blocks the session named in `session:` from ending a turn
-  while the effort file has open items; other sessions are never gated. To stop legitimately, set `status: blocked` with the blocker recorded,
-  or `status: done` after `verify` passes.
+  while the effort file has open items; other sessions are never gated. To
+  stop legitimately, set `status: blocked` with the blocker recorded, or
+  `status: done` after `verify` passes.
 - Keep the effort file current whenever a decision, approval, item status or
   next step changes. After compaction it is the source of truth.
