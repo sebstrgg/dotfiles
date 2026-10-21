@@ -34,9 +34,13 @@ WRAPPERS = {  # wrapper -> its options that take a value
 }
 CONTROL_WORDS = {'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{', '--'}
 ASSIGNMENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*=')
-PS_ARGUMENT_FIELDS = {'args', 'command', 'cmd'}
-PS_SELECTING_FLAGS = set('Aadehmrwx')  # choose or sort processes, add no column
-PS_OPTIONS_WITH_VALUE = set('GUoptu')
+PS_SELECTING_FLAGS = set('Aadhmrwx')  # choose or sort processes, add no column
+PS_OPTIONS_WITH_VALUE = set('GUopt')
+PS_NAME_FIELDS = {  # columns that never hold arguments or the environment, on macOS and procps
+    'pid', 'ppid', 'pgid', 'sess', 'tpgid', 'uid', 'ruid', 'user', 'ruser', 'gid', 'rgid',
+    'group', 'tty', 'tt', 'stat', 'state', 'rss', 'vsz', '%cpu', '%mem', 'pcpu', 'pmem',
+    'comm', 'ucomm', 'ucmd', 'etime', 'etimes', 'time', 'cputime', 'start', 'lstart',
+    'nice', 'ni', 'pri', 'flags', 'wchan', 'nlwp'}
 PGREP_OPTIONS_WITH_VALUE = set('FGMNPUdgrstu')
 
 
@@ -204,10 +208,10 @@ def force_push(words):
 
 def lists_arguments(words):
     """A `ps` or `pgrep` that may print process arguments. `ps` passes only in the
-    form that reads the same on macOS and Linux: dashed flags that choose or sort
-    processes, `-p`/`-t`/`-u`/`-U`/`-G` with their values, and `-o` formats with
-    no `args`, `command` or `cmd` column. `pgrep` is refused with `-a`, or `-l`
-    with `-f`."""
+    form that reads the same on macOS (in either mode) and Linux: dashed flags
+    that choose or sort processes, `-p`/`-t`/`-U`/`-G` with their values, and
+    `-o` formats made only of name and number columns. `pgrep` is refused with
+    `-a`, or `-l` with `-f`."""
     words = strip_prefix(words)
     if not words:
         return False
@@ -239,8 +243,8 @@ def lists_arguments(words):
             if letter not in PS_SELECTING_FLAGS:
                 return True
     fields = {field.partition('=')[0].partition(':')[0]
-              for value in formats for field in re.split(r'[,\s]+', value)}
-    return not formats or bool(fields & PS_ARGUMENT_FIELDS)
+              for value in formats for field in re.split(r'[,\s]+', value)} - {''}
+    return not formats or not fields <= PS_NAME_FIELDS
 
 
 def shell_text(command):

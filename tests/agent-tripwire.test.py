@@ -130,9 +130,9 @@ class AgentTripwire(unittest.TestCase):
                         'ps -p 123 -o pid,comm',
                         'ps -o pid= -p 123',
                         'ps -o stat= -p 123',
-                        'ps -eo pid,ppid,etime,comm',
+                        'ps -Ao pid,ppid,etime,comm',
                         'ps -axo pid,ucomm',
-                        'ps -u sebastian -o pid,comm',
+                        'ps -U 501 -o pid,user,comm',
                         'ps -o pid=command -p 1',
                         'ps -o pid,comm:20',
                         'ps -p 123,456 -o pid=,comm=',
@@ -154,7 +154,14 @@ class AgentTripwire(unittest.TestCase):
                         'ps -g 100 -o pid,comm',
                         'ps -T -o pid,comm',
                         'ps --pid 1 -o pid',
-                        'ps -o pid,comm 123'):
+                        'ps -o pid,comm 123',
+                        'ps -eo pid,comm',
+                        'ps -u sebastian -o pid,comm',
+                        'COMMAND_MODE=legacy ps -axo comm -u',
+                        'ps -axeww -o pid,comm',
+                        'ps -axo environ',
+                        'ps -axo %a',
+                        'ps -axo DefSysV'):
             self.assertEqual(decide(command), 'deny', command)
 
     def test_codex_argv_command_is_read(self):
