@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""PreToolUse hook for Claude Code and Codex: refuse a force-push.
+"""PreToolUse hook for Claude Code and Codex: refuse a force-push, and a process
+listing that would copy process arguments into the transcript.
 
 Reads the hook event on stdin. For a shell command that runs `git push` with
 `--force`, `--mirror`, `-f` (alone or in a short-flag group) or a `+refspec`, it
-prints a deny decision; every other call passes silently. `--force-with-lease`
-and `--force-if-includes` stay allowed: they refuse to overwrite work the agent
-has not fetched.
+prints a deny decision. `--force-with-lease` and `--force-if-includes` stay
+allowed: they refuse to overwrite work the agent has not fetched. A `ps` or
+`pgrep` that prints arguments is denied too: tools pass API keys and whole
+environments as arguments, and a listing filtered through grep still carries
+them. Every other call passes silently.
 
 Permission rules match command text by position, so a force flag after the
 remote, or `git -C <dir>` in front, slipped past them; this reads the words of
@@ -30,6 +33,11 @@ WRAPPERS = {  # wrapper -> its options that take a value
 }
 CONTROL_WORDS = {'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{', '--'}
 ASSIGNMENT = re.compile(r'[A-Za-z_][A-Za-z0-9_]*=')
+PS_ARGUMENT_FIELDS = {'args', 'command', 'cmd'}
+PS_UNIX_ADDS_ARGUMENTS = set('EFOfjlv')  # formats with a command column, or the environment
+PS_BSD_ADDS_ARGUMENTS = set('Oejlsuv')
+PS_OPTIONS_WITH_VALUE = set('CGUgptu')
+PGREP_OPTIONS_WITH_VALUE = set('FGMNPUdgrstu')
 
 
 def simple_commands(text):
@@ -194,6 +202,48 @@ def force_push(words):
     return False
 
 
+def lists_arguments(words):
+    """A `ps` or `pgrep` that prints process arguments: `ps` without an output
+    format, with an `args`/`command`/`cmd` column, or with a flag that adds one;
+    `pgrep -a`, or `-l` with `-f`."""
+    words = strip_prefix(words)
+    if not words:
+        return False
+    name, rest = words[0].rsplit('/', 1)[-1], iter(words[1:])
+    if name == 'pgrep':
+        flags = set()
+        for word in rest:
+            if word == '--list-full':
+                return True
+            if word.startswith('-') and not word.startswith('--'):
+                for letter in word[1:]:
+                    if letter in PGREP_OPTIONS_WITH_VALUE:
+                        break
+                    flags.add(letter)
+        return 'a' in flags or {'l', 'f'} <= flags
+    if name != 'ps':
+        return False
+    formats = []
+    for word in rest:
+        if word.startswith('--'):
+            option, has_value, value = word.partition('=')
+            if option == '--format':
+                formats.append(value if has_value else next(rest, ''))
+        elif word.startswith('-') or word.isalpha():  # Unix flags, or a BSD group such as `aux`
+            unix = word.startswith('-')
+            letters = word.lstrip('-')
+            for position, letter in enumerate(letters, start=1):
+                if letter in (PS_UNIX_ADDS_ARGUMENTS if unix else PS_BSD_ADDS_ARGUMENTS):
+                    return True
+                if letter == 'o' or (unix and letter in PS_OPTIONS_WITH_VALUE):
+                    value = letters[position:] or next(rest, '')
+                    if letter == 'o':
+                        formats.append(value)
+                    break
+    fields = {field.partition('=')[0] for value in formats for field in re.split(r'[,\s]+', value)}
+    return not formats or bool(fields & PS_ARGUMENT_FIELDS)
+
+
 def shell_text(command):
     """Codex may pass argv (`["bash", "-lc", "<script>"]`); Claude passes a string."""
     if isinstance(command, list):
@@ -215,12 +265,18 @@ def main():
     except ValueError:
         return 0
     if any(force_push(words) for words in commands):
-        print(json.dumps({'hookSpecificOutput': {
-            'hookEventName': 'PreToolUse',
-            'permissionDecision': 'deny',
-            'permissionDecisionReason': (
-                'Force-push rewrites remote history. On your own branch use '
-                '--force-with-lease; anything else needs Sebastian.')}}))
+        reason = ('Force-push rewrites remote history. On your own branch use '
+                  '--force-with-lease; anything else needs Sebastian.')
+    elif any(lists_arguments(words) for words in commands):
+        reason = ('Process arguments can carry secrets, and this listing would copy them into '
+                  'the transcript. List names only: `ps -axo pid,rss,comm`, `pgrep -x <name>`, '
+                  'or `pgrep -f <pattern>` for PIDs.')
+    else:
+        return 0
+    print(json.dumps({'hookSpecificOutput': {
+        'hookEventName': 'PreToolUse',
+        'permissionDecision': 'deny',
+        'permissionDecisionReason': reason}}))
     return 0
 
 

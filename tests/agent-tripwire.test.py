@@ -83,6 +83,61 @@ class AgentTripwire(unittest.TestCase):
                         'git commit -m "explain why --force is wrong"'):
             self.assertEqual(decide(command), 'allow', command)
 
+    def test_process_listings_that_print_arguments_are_denied(self):
+        for command in ('ps',
+                        'ps aux',
+                        'ps -ef',
+                        'ps -ax',
+                        '/bin/ps aux | grep node',
+                        'sudo ps aux',
+                        'ps -axo pid,command | rg "vite|node"',
+                        'ps -o pid,args -p 123',
+                        'ps -o args= -p 123',
+                        'ps -eo pid,cmd',
+                        'ps -axo pid,rss,comm,command',
+                        'ps -o pid -o command -p 1',
+                        'ps -opid,command',
+                        "ps -A -o 'pid command'",
+                        'ps --format pid,args',
+                        'ps --format=pid,cmd',
+                        'ps axo pid,command',
+                        'ps -p 123',
+                        'ps -axO rss',
+                        'ps -f -o pid -p 1',
+                        'ps -j -o pid',
+                        'ps -lo pid',
+                        'ps -v -o pid',
+                        'ps -E -o pid,comm',
+                        'ps auxo pid,comm',
+                        'pgrep -lf node',
+                        'pgrep -fl node',
+                        'pgrep -l -f node',
+                        'pgrep -af node',
+                        'pgrep -a node',
+                        'pgrep --list-full node',
+                        'echo "$(ps aux)"'):
+            self.assertEqual(decide(command), 'deny', command)
+
+    def test_process_listings_of_names_and_ids_are_allowed(self):
+        for command in ('ps -axo pid,rss,comm',
+                        'ps -axo pid,rss,comm | sort -k2 -n',
+                        'ps -p 123 -o pid,comm',
+                        'ps -o pid= -p 123',
+                        'ps -o stat= -p 123',
+                        'ps -eo pid,ppid,etime,comm',
+                        'ps -axo pid,ucomm',
+                        'ps -u sebastian -o pid,comm',
+                        'ps -o pid=command -p 1',
+                        'ps axo pid,comm',
+                        'pgrep -x node',
+                        'pgrep -f vite',
+                        'pgrep -l node',
+                        'pgrep -u sebastian -f vite',
+                        'echo "ps aux"',
+                        'git commit -m "never run ps aux"',
+                        'man ps'):
+            self.assertEqual(decide(command), 'allow', command)
+
     def test_codex_argv_command_is_read(self):
         self.assertEqual(decide(['bash', '-lc', 'git push origin main --force']), 'deny')
         self.assertEqual(decide(['git', 'push', '-f']), 'deny')

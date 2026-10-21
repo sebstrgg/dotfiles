@@ -33,7 +33,7 @@ costs more than doing it.
 
 Claude tokens are the scarcest. A Claude orchestrator gives Sol everything a
 precise brief can carry and keeps the judgment. A Codex orchestrator runs its own
-Sol agents and brings in Opus for design, rendered-UI and copy review, a
+Sol workers through `agent-run` and brings in Opus for design, rendered-UI and copy review, a
 diagnosis Sol couldn't crack, and cross-family review.
 
 ## Briefs
@@ -46,7 +46,8 @@ diagnosis Sol couldn't crack, and cross-family review.
 - UI lanes get the approved design and a way to see their result rendered;
   Claude reviews that rendering before it counts.
 - A delegated agent works its brief and reports back. It does not start second
-  opinions, reviews or further delegation; the orchestrator decides those.
+  opinions, reviews or further delegation, and no brief offers them: the
+  orchestrator decides those.
 - Workers make no paid or metered calls (`claude -p`, model APIs). Only the
   orchestrator spends, within what Sebastian approved; the cross-family verify
   and reviews the workflow calls for are part of every approved brief.
@@ -101,6 +102,9 @@ diagnosis Sol couldn't crack, and cross-family review.
   the run folder; `--model` and `--effort` override. `agent-run wait <run-dir>`
   blocks until it ends and prints the last message and resume handle: from
   Claude as a background command, from Codex in the foreground.
+- A Codex orchestrator starts its own workers this way too: Codex's built-in
+  subagents store their briefs and messages encrypted, beyond audit, and stop
+  for good when the parent's turn fails.
 - `agent-run` starts Codex lanes, verifiers and reviewers signed out of Claude;
   only a `continue` run keeps Claude reachable.
 - Run folders live under `.scratch/<effort>/runs/`, never `/tmp`: a restart
