@@ -17,6 +17,12 @@
   failure, blocks the merge until fixed.
 - Write PR bodies with `pr`.
 
+## A secret in git history
+
+- Rewrite with `git filter-repo`, push with `--force-with-lease`, and keep the
+  pre-rewrite backup (a bundle) in `.scratch/<effort>/`: out of git, and
+  removed with the effort. The report names it, and asks to rotate the secret.
+
 ## Shared areas
 
 - When another session owns an area, split by app or file, announce merges,

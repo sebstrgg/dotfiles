@@ -26,10 +26,12 @@ or freeing the session forever; any change to an item or task row is progress.
 When the owner ends a turn on a finished effort (status `done` or `blocked`, or
 every item passed with nothing running), the gate holds it once more in two
 cases: items are `pass` but no `verify` run by the other runtime has finished
-under the effort's `runs/` folder (`bin/agent-run` records each run there), or
+under the effort's `runs/` folder (`bin/agent-run` records each run there) after
+starting no earlier than the checkout's newest commit, or
 the brief still lists reserved actions under "Not approved" and the last message
-asks fewer questions than it lists actions. Markers beside the effort file keep
-each to once per owner and subject.
+asks fewer questions than it lists actions (one per list item or `;`-separated
+part). Markers beside the effort file keep each to once per owner and subject; a
+new commit is a new subject for the verify question.
 """
 import contextlib
 import hashlib
@@ -39,6 +41,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 MAX_IDENTICAL_BLOCKS = 5
@@ -157,8 +160,13 @@ NOT_APPROVED = re.compile(r'\s*(?:[-*+]\s+)?\*\*not approved:?\*\*:?(.*)', re.IG
 FIELD = re.compile(r'\s*(?:[-*+]\s+)?\*\*[^*]+?(?::\*\*|\*\*:)')
 LIST_ITEM = re.compile(r'\s*(?:[-*+]|\d+[.)])\s')
 LINK = re.compile(r'\b[a-z][a-z0-9+.-]*://[^\s)]*[^\s).,?!:;]', re.IGNORECASE)
-# The template's prompt before it named the follow-ups; older effort files keep it.
-EARLIER_PLACEHOLDERS = {'reserved actions that are still open.'}
+# The template's earlier prompts; older effort files keep them.
+EARLIER_PLACEHOLDERS = {
+    'reserved actions that are still open.',
+    'reserved actions still open, including follow-ups the request leaves undecided '
+    '(rotating an exposed secret, going public), or `None.`; the final report asks each '
+    'as a yes/no question.',
+}
 
 
 def not_approved_text(text):
@@ -195,9 +203,10 @@ def reserved_actions(text):
 
 
 def action_count(reserved):
-    """How many actions a "Not approved" text lists, counting generously: list
-    items, and parts split at semicolons, commas and "and"."""
-    parts = re.split(r';|,|\band\b|(?:^|\s)(?:[-*+]|\d+[.)])\s', reserved)
+    """How many actions a "Not approved" text lists: list items and
+    semicolon-separated parts. Commas, "and" and parentheses sit inside single
+    actions too often to split on."""
+    parts = re.split(r';|(?:^|\s)(?:[-*+]|\d+[.)])\s', re.sub(r'\([^)]*\)', '', reserved))
     return max(1, sum(1 for part in parts if part.strip(' .')))
 
 
@@ -321,23 +330,26 @@ def stop(event, runtime=None):
     for path, text, status in efforts:
         if not closing(text, status):
             continue
-        if (passed(text) and not verified_by(path, other)
-                and first_time(path, '.verify-question', session_id, other)):
+        since = newest_commit(path.parents[2])
+        if (passed(text) and not verified_by(path, other, since)
+                and first_time(path, '.verify-question', session_id, f'{other} {since}')):
             return {'decision': 'block', 'reason': (
                 f'{path} has items marked `pass`, but no `verify` run by '
-                f'{FAMILY_NAMES[other]} has finished under {path.parent / "runs"}. Only a fresh '
-                'verify from the other model family makes an item `pass`; a same-family check '
-                f'adds evidence. If {FAMILY_NAMES[other]} could not run, set those items back to '
-                '`open` or `blocked`, record why, and correct your report. If it did pass them '
-                'by another route, name that run in Evidence.')}
+                f'{FAMILY_NAMES[other]} has finished under {path.parent / "runs"} since the '
+                'newest commit in this checkout. Only a fresh verify from the other model family, '
+                'run on the final change, makes an item `pass`; a same-family check adds '
+                f'evidence. Run one now with `agent-run`. If {FAMILY_NAMES[other]} could not run, '
+                'set those items back to `open` or `blocked`, record why, and correct your '
+                'report. If it did pass them by another route, name that run in Evidence.')}
         reserved = reserved_actions(text)
         if (reserved and not asks(last_message, action_count(reserved))
                 and first_time(path, '.close-question', session_id, reserved)):
             return {'decision': 'block', 'reason': (
                 f'{path} lists reserved actions under "Not approved": {reserved.rstrip(".")}. '
                 'End your report with each one still open as a yes/no question to Sebastian '
-                'with your recommended answer, above all one his request left undecided. If '
-                'none is still open, set "Not approved" to `None.`')}
+                'with your recommended answer, above all one his request left undecided. An '
+                'action leaves "Not approved" only once Sebastian has answered it: move it to '
+                '"Approved" with where he answered.')}
     return None
 
 
@@ -346,16 +358,35 @@ def passed(text):
                for row in table(text, 'done when'))
 
 
-def verified_by(path, runtime):
-    """Whether a `verify` run by `runtime` has finished under the effort's runs folder."""
+def newest_commit(checkout):
+    """Commit time of the checkout's HEAD in epoch seconds; None outside git or
+    before the first commit."""
+    try:
+        result = subprocess.run(['git', '-C', str(checkout), 'log', '-1', '--format=%ct'],
+                                capture_output=True, text=True, timeout=5)
+        return int(result.stdout.strip())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def verified_by(path, runtime, since):
+    """Whether a `verify` run by `runtime` has finished under the effort's runs
+    folder, started no earlier than `since` (epoch seconds, or None for any time):
+    a verify from before the latest commit did not check it."""
     for record in path.parent.glob('runs/*/command.json'):
         try:
             run = json.loads(record.read_text())
             finished = (record.parent / 'exit').read_text().strip() == '0'
         except (OSError, ValueError):
             continue
-        if (finished and isinstance(run, dict) and run.get('role') == 'verify'
+        if not (finished and isinstance(run, dict) and run.get('role') == 'verify'
                 and run.get('runtime') == runtime):
+            continue
+        try:
+            started = datetime.strptime(str(run.get('started')), '%Y-%m-%dT%H:%M:%S%z').timestamp()
+        except ValueError:
+            started = None
+        if since is None or (started is not None and started >= since):
             return True
     return False
 

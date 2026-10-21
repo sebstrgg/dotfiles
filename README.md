@@ -195,8 +195,9 @@ machine. Start a new agent session after installation.
   (Codex asks once to trust new hooks via `/hooks`). A "done when" item marked
   `pass` on evidence labelled a substitute stays open, also in an effort set
   to `done`. At close it holds the owner once if items passed without a
-  finished `agent-run` verify by the other runtime under the effort's `runs/`,
-  and once if "Not approved" lists actions the last message does not ask.
+  finished `agent-run` verify by the other runtime under the effort's `runs/`
+  that started after the checkout's newest commit, and once if "Not approved"
+  lists actions (list items or `;`-separated) the last message does not ask.
   Tests:
   `python3 tests/effort-gate.test.py`.
 - **Cross-runtime runs.** [`bin/agent-run`](bin/agent-run) starts a detached

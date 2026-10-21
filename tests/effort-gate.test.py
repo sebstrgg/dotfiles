@@ -69,11 +69,15 @@ class EffortGate(unittest.TestCase):
             self.record_run(path, runtime)
         return path
 
-    def record_run(self, path, runtime, role='verify', exit_code='0'):
-        """A finished agent-run run folder beside the effort file."""
-        run = path.parent / 'runs' / f'{role}-{runtime}'
+    def record_run(self, path, runtime, role='verify', exit_code='0', started=None, name=None):
+        """A finished agent-run run folder beside the effort file; `started` is
+        its local start time as agent-run writes it."""
+        run = path.parent / 'runs' / (name or f'{role}-{runtime}')
         run.mkdir(parents=True, exist_ok=True)
-        (run / 'command.json').write_text(json.dumps({'runtime': runtime, 'role': role}))
+        record = {'runtime': runtime, 'role': role}
+        if started:
+            record['started'] = started
+        (run / 'command.json').write_text(json.dumps(record))
         if exit_code is not None:
             (run / 'exit').write_text(f'{exit_code}\n')
 
@@ -260,7 +264,10 @@ class EffortGate(unittest.TestCase):
         self.assertIn('publishing to PyPI', self.run_gate('stop', last='Done.')['reason'])
 
     def test_earlier_template_prompt_is_not_a_reserved_action(self):
-        for not_approved in ('reserved actions that are still open.', '`None.`'):
+        for not_approved in ('reserved actions that are still open.', '`None.`',
+                             'reserved actions still open, including follow-ups the request '
+                             'leaves undecided (rotating an exposed secret, going public), or '
+                             '`None.`; the final report asks each as a yes/no question.'):
             self.session = str(uuid.uuid4())
             self.write_effort(status='done', first='pass', not_approved=not_approved)
             self.assertIsNone(self.run_gate('stop', last='Done.'), not_approved)
@@ -380,6 +387,67 @@ class EffortGate(unittest.TestCase):
         self.record_run(path, 'claude', exit_code=None)
         self.record_run(path, 'claude', role='review')
         self.assertEqual(self.run_gate('stop', last='Done.')['decision'], 'block')
+
+    def commit(self, when):
+        """Commit in the test checkout at `when` (ISO 8601 with offset)."""
+        env = {**os.environ, 'GIT_AUTHOR_DATE': when, 'GIT_COMMITTER_DATE': when,
+               'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@example.test',
+               'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@example.test'}
+        subprocess.run(['git', '-C', str(self.repo), 'commit', '-q', '--allow-empty', '-m', 'change'],
+                       check=True, env=env)
+
+    def test_verify_from_before_the_newest_commit_is_questioned(self):
+        path = self.write_effort(status='done', first='pass', verified_by=())
+        self.record_run(path, 'claude', started='2026-10-21T10:00:00+0200')
+        self.commit('2026-10-21T11:00:00+02:00')
+        reason = self.run_gate('stop', last='Done.')['reason']
+        self.assertIn('since the newest commit', reason)
+
+    def test_verify_after_the_newest_commit_closes(self):
+        path = self.write_effort(status='done', first='pass', verified_by=())
+        self.commit('2026-10-21T11:00:00+02:00')
+        self.record_run(path, 'claude', started='2026-10-21T11:05:00+0200')
+        self.assertIsNone(self.run_gate('stop', last='Done.'))
+
+    def test_verify_without_a_start_time_counts_only_before_any_commit(self):
+        path = self.write_effort(status='done', first='pass', verified_by=())
+        self.record_run(path, 'claude')
+        self.assertIsNone(self.run_gate('stop', last='Done.'))
+        self.commit('2026-10-21T11:00:00+02:00')
+        self.assertEqual(self.run_gate('stop', last='Done.')['decision'], 'block')
+
+    def test_a_new_commit_asks_for_a_fresh_verify_again(self):
+        self.write_effort(status='done', first='pass', verified_by=())
+        self.commit('2026-10-21T11:00:00+02:00')
+        self.assertEqual(self.run_gate('stop', last='Done.')['decision'], 'block')
+        self.assertIsNone(self.run_gate('stop', last='Done.'))
+        self.commit('2026-10-21T12:00:00+02:00')
+        self.assertEqual(self.run_gate('stop', last='Done.')['decision'], 'block')
+
+    def test_commas_and_parentheses_stay_inside_one_action(self):
+        for not_approved in ('Pushing to GitHub (public repo, visible to all).',
+                             'Trusting the tripwire and clock hooks in Codex.',
+                             'Rotating the key, which was committed in 714a17e.'):
+            self.session = str(uuid.uuid4())
+            self.write_effort(status='done', first='pass', not_approved=not_approved)
+            last = 'Done.\n\n- Go ahead with it? I recommend yes.'
+            self.assertIsNone(self.run_gate('stop', last=last), not_approved)
+
+    def test_each_list_item_is_one_action(self):
+        path = self.write_effort(status='done', first='pass')
+        path.write_text(path.read_text().replace(
+            '**Not approved:** None.',
+            '**Not approved:**\n\n- Going public (repo, docs)\n- Rotating the key, then revoking it'))
+        self.assertEqual(self.run_gate('stop', last='Done.\n\nGo public? I recommend no.')['decision'],
+                         'block')
+        last = 'Done.\n\n- Go public? I recommend no.\n- Rotate the key? I recommend yes.'
+        self.assertIsNone(self.run_gate('stop', last=last))
+
+    def test_close_question_keeps_answered_actions_with_sebastian(self):
+        self.write_effort(status='done', first='pass', not_approved='Going public.')
+        reason = self.run_gate('stop', last='Done.')['reason']
+        self.assertIn('only once Sebastian has answered it', reason)
+        self.assertNotIn('set "Not approved" to', reason)
 
     def test_close_with_nothing_passed_needs_no_verify(self):
         self.write_effort(status='blocked', first='blocked', verified_by=())

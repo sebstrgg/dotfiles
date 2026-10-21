@@ -162,7 +162,7 @@
       }
     }
   },
-  "effortLevel": "xhigh",
+  "effortLevel": "high",
   "skipDangerousModePermissionPrompt": true,
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
@@ -171,5 +171,13 @@
   "autoMemoryEnabled": false,
   "env": {
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000"
+  },
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "effortLevel": "high"
+    },
+    "claude-sonnet-5-5": {
+      "effortLevel": "high"
+    }
   }
 }

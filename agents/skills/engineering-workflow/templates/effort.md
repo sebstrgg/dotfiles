@@ -15,9 +15,10 @@ Current state only: rewrite sections as things change and delete what is stale.
 **Approved:** each approval with where it was given (request, grilling, spec,
 session). Internal work needs none.
 
-**Not approved:** reserved actions still open, including follow-ups the
-request leaves undecided (rotating an exposed secret, going public), or
-`None.`; the final report asks each as a yes/no question.
+**Not approved:** one list item per reserved action still open, including
+follow-ups the request leaves undecided (rotating an exposed secret, going
+public), or `None.` An item moves to Approved only with Sebastian's answer; the
+final report asks each as a yes/no question.
 
 **Budget:** time or usage limit, and when to stop and report.
 

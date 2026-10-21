@@ -87,8 +87,8 @@ Docs: compared with their source.
 
 ## 5. Deliver
 
-Follow [delivery](references/delivery.md): branches, pull requests, merge,
-deploy. Internal delivery proceeds; external actions need an approval recorded
+Follow [delivery](references/delivery.md): branches, pull requests, history
+rewrites, merge, deploy. Internal delivery proceeds; external actions need an approval recorded
 in the effort file.
 
 ## 6. Verify
