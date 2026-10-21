@@ -35,8 +35,10 @@ An item fails when:
 
 - the only evidence is a test, a healthy process, a successful tool call or
   another model's agreement;
-- the check exercised a substitute (a fallback path, a mock, an emulator where
-  a device matters, an easier input) instead of the real object and journey;
+- the check exercised a substitute (a fallback path, a mock, a stand-in or
+  fake server, an emulator where a device matters, an easier input) instead
+  of the real object and journey; when the real target is out of reach, the
+  verdict is `cannot-check`;
 - an intermittent failure was declared fixed from a single probe; observe it
   over a period that would have shown the failure;
 - an evaluation compares against model-generated labels or no baseline; it

@@ -193,7 +193,9 @@ machine. Start a new agent session after installation.
   not gated. `.scratch/` is kept out of git through the repository's
   `info/exclude`. Hooks: `claude/settings.json`, `codex/hooks.json`
   (Codex asks once to trust new hooks via `/hooks`). A "done when" item marked
-  `pass` on evidence labelled a substitute stays open. Tests:
+  `pass` on evidence labelled a substitute stays open. When a finished
+  effort still lists reserved actions under "Not approved" and the last
+  message asks nothing, the gate holds the owner once to ask them. Tests:
   `python3 tests/effort-gate.test.py`.
 - **Cross-runtime runs.** [`bin/agent-run`](bin/agent-run) starts a detached
   `codex exec` or `claude -p` run for a role (`work`, `continue`, `verify`,

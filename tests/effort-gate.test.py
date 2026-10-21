@@ -19,6 +19,10 @@ session: {session}
 
 # Example
 
+## Brief
+
+**Not approved:** {not_approved}
+
 ## Done when
 
 | # | Item | Check on the real target | Status | Evidence |
@@ -53,17 +57,20 @@ class EffortGate(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def write_effort(self, status='active', first='open', checkout=None, task='', evidence=''):
+    def write_effort(self, status='active', first='open', checkout=None, task='', evidence='',
+                     not_approved='None.'):
         path = self.repo / '.scratch' / 'example' / 'effort.md'
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(EFFORT.format(status=status, first=first, checkout=checkout or self.repo,
                                       session=self.session, task=task,
-                                      evidence=evidence))
+                                      evidence=evidence, not_approved=not_approved))
         return path
 
-    def run_gate(self, mode, cwd=None, event='Stop', session=None, runtime=None):
+    def run_gate(self, mode, cwd=None, event='Stop', session=None, runtime=None, last=None):
         payload = {'session_id': session or self.session, 'cwd': str(cwd or self.repo),
                    'hook_event_name': event}
+        if last is not None:
+            payload['last_assistant_message'] = last
         command = ['python3', str(GATE), mode, *([runtime] if runtime else [])]
         result = subprocess.run(command, input=json.dumps(payload),
                                 capture_output=True, text=True, check=True)
@@ -160,6 +167,62 @@ class EffortGate(unittest.TestCase):
             self.write_effort(status=status)
             self.assertIsNone(self.run_gate('stop'), status)
 
+    def test_close_asks_each_reserved_action_once(self):
+        self.write_effort(status='done', not_approved='Making the repository public.')
+        output = self.run_gate('stop', last='Done: all items pass.\n\nPublic release remains your call.')
+        self.assertEqual(output['decision'], 'block')
+        self.assertIn('Making the repository public', output['reason'])
+        self.assertIn('yes/no question', output['reason'])
+        self.assertIsNone(self.run_gate('stop', last='Make the repository public? I recommend no.'))
+        self.assertIsNone(self.run_gate('stop', last='Anything else.'))
+
+    def test_close_report_that_already_asks_is_not_held(self):
+        self.write_effort(status='done', not_approved='Rotating the exposed token.')
+        last = ('Done.\n\n- Rotate the token exposed in weather.py (commit f932687)? '
+                'I recommend yes.\n\nLeft behind: nothing.')
+        self.assertIsNone(self.run_gate('stop', last=last))
+
+    def test_close_question_comes_when_every_item_passed(self):
+        for status in ('active', 'blocked'):
+            self.session = str(uuid.uuid4())
+            self.write_effort(status=status, first='pass', not_approved='Publishing to PyPI.')
+            self.assertEqual(self.run_gate('stop', last='All done.')['decision'], 'block', status)
+
+    def test_reserved_actions_listed_as_bullets_are_read(self):
+        path = self.write_effort(status='done')
+        path.write_text(path.read_text().replace(
+            '**Not approved:** None.', '**Not approved:**\n\n- Going public\n- Tagging v1.0.0'))
+        reason = self.run_gate('stop', last='Done.')['reason']
+        self.assertIn('Going public', reason)
+        self.assertIn('Tagging v1.0.0', reason)
+
+    def test_changed_reserved_actions_are_asked_again(self):
+        path = self.write_effort(status='done', not_approved='Going public; tagging v1.0.0.')
+        self.run_gate('stop', last='Done.')
+        path.write_text(path.read_text().replace('Going public; tagging', 'Tagging'))
+        self.assertEqual(self.run_gate('stop', last='Tagged.')['decision'], 'block')
+
+    def test_no_reserved_actions_closes_without_a_question(self):
+        for not_approved in ('None.', 'none', ''):
+            self.session = str(uuid.uuid4())
+            self.write_effort(status='done', not_approved=not_approved)
+            self.assertIsNone(self.run_gate('stop', last='Done.'), not_approved)
+
+    def test_template_prompt_is_not_a_reserved_action(self):
+        self.run_command('new', 'login', env_ids={'CODEX_THREAD_ID': self.session})
+        path = self.repo / '.scratch' / 'login' / 'effort.md'
+        path.write_text(path.read_text().replace('status: active', 'status: done'))
+        self.assertIsNone(self.run_gate('stop', last='Done.'))
+
+    def test_waiting_mid_effort_is_not_a_close(self):
+        self.write_effort(task='| Export | Bash | bg-1 | main | running |',
+                          not_approved='Going public.')
+        self.assertIsNone(self.run_gate('stop', runtime='claude', last='Waiting for the export.'))
+
+    def test_other_sessions_are_never_asked_to_close(self):
+        self.write_effort(status='done', not_approved='Going public.')
+        self.assertIsNone(self.run_gate('stop', session=str(uuid.uuid4()), last='Done.'))
+
     def test_copy_in_another_checkout_is_ignored(self):
         self.write_effort(checkout='/somewhere/else')
         self.assertIsNone(self.run_gate('stop'))
@@ -201,7 +264,7 @@ class EffortGate(unittest.TestCase):
         text = path.read_text()
         self.assertIn('status: blocked', text)
         self.assertIn('without progress on: #1 Login works', text)
-        self.assertNotIn('None.', text)
+        self.assertNotIn('## Blockers\n\nNone.', text)
         self.assertIn('## Next', text)
         self.assertIsNone(self.run_gate('stop'))
 

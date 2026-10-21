@@ -15,7 +15,9 @@ Current state only: rewrite sections as things change and delete what is stale.
 **Approved:** each approval with where it was given (request, grilling, spec,
 session). Internal work needs none.
 
-**Not approved:** reserved actions that are still open.
+**Not approved:** reserved actions still open, including follow-ups the
+request leaves undecided (rotating an exposed secret, going public), or
+`None.`; the final report asks each as a yes/no question.
 
 **Budget:** time or usage limit, and when to stop and report.
 
