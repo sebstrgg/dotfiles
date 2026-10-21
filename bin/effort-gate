@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Hook for Claude Code and Codex: keep a run going while its effort has open items.
+"""Effort files, and the Claude Code and Codex hooks that hold a session to one.
 
-  effort-gate stop     Stop hook: block ending the turn while the active effort
-                       file in this checkout has open "done when" items.
-  effort-gate context  Compaction hook: point the agent back at the effort file.
+  effort-gate new <effort>  Create .scratch/<effort>/effort.md in this checkout
+                            from the template, owned by the calling session.
+  effort-gate claim <file>  Make the calling session the owner (taking over).
+  effort-gate stop          Stop hook: block ending the turn while the session's
+                            active effort file has open "done when" items.
+  effort-gate context       Compaction hook: point the agent back at the file.
 
-An effort file is `.scratch/<effort>/effort.md` with front matter `status: active`
-and `checkout:` equal to this checkout. Copies in other worktrees never match.
+An effort file is `.scratch/<effort>/effort.md` with front matter `status: active`,
+`checkout:` equal to this checkout and `session:` naming the owning session. Only
+the owner is gated: verifiers and workers running in the same checkout, and
+copies of the file in other worktrees, never match.
 After MAX_IDENTICAL_BLOCKS stops without progress the gate stops blocking: it
 marks the effort `blocked`, records why under "## Blockers" and warns the user.
 """
@@ -20,6 +25,9 @@ import tempfile
 from pathlib import Path
 
 MAX_IDENTICAL_BLOCKS = 5
+TEMPLATE = (Path(__file__).resolve().parents[1]
+            / 'agents' / 'skills' / 'engineering-workflow' / 'templates' / 'effort.md')
+SESSION_VARIABLES = {'codex': 'CODEX_THREAD_ID', 'claude': 'CLAUDE_CODE_SESSION_ID'}
 
 
 def read_event():
@@ -77,7 +85,7 @@ def open_items(text):
     return rows
 
 
-def active_effort(cwd):
+def active_effort(cwd, session_id):
     root = checkout_root(cwd)
     for path in sorted(root.glob('.scratch/*/effort.md')):
         try:
@@ -86,9 +94,70 @@ def active_effort(cwd):
             continue
         fields = front_matter(text)
         checkout = fields.get('checkout', '')
-        if fields.get('status') == 'active' and checkout and Path(checkout).expanduser().resolve() == root:
+        if (session_id and fields.get('status') == 'active' and fields.get('session') == session_id
+                and checkout and Path(checkout).expanduser().resolve() == root):
             return path, text
     return None, None
+
+
+def own_session_id():
+    """Id of the agent session running this command. A session started from another
+    agent inherits that agent's variable too, so the nearest runtime process decides.
+    Where `ps` is unavailable (the Codex sandbox), Codex's own variable wins. Exits
+    when no agent session runs this command."""
+    ids = {runtime: os.environ.get(variable) for runtime, variable in SESSION_VARIABLES.items()}
+    pid = os.getppid()
+    for _ in range(10):
+        try:
+            result = subprocess.run(['ps', '-o', 'ppid=,comm=', '-p', str(pid)],
+                                    capture_output=True, text=True, timeout=3, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            break
+        fields = result.stdout.split(None, 1)
+        if len(fields) != 2 or not fields[0].isdigit():
+            break
+        runtime = Path(fields[1].strip()).name
+        if ids.get(runtime):
+            return ids[runtime]
+        pid = int(fields[0])
+        if pid <= 1:
+            break
+    if ids['codex'] or ids['claude']:
+        return ids['codex'] or ids['claude']
+    sys.exit('effort-gate: no session id ($CLAUDE_CODE_SESSION_ID or $CODEX_THREAD_ID); '
+             'run this from the agent session that owns the effort')
+
+
+def set_owner(text, session_id):
+    return re.sub(r'^session:.*$', f'session: {session_id}', text, count=1, flags=re.MULTILINE)
+
+
+def new(name):
+    session_id = own_session_id()
+    root = checkout_root(os.getcwd())
+    path = root / '.scratch' / name / 'effort.md'
+    if path.exists():
+        sys.exit(f'effort-gate: {path} exists; to take it over: effort-gate claim {path}')
+    text = re.sub(r'^checkout:.*$', f'checkout: {root}', TEMPLATE.read_text(), count=1,
+                  flags=re.MULTILINE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(set_owner(text, session_id))
+    ignored = subprocess.run(['git', '-C', str(root), 'check-ignore', '-q', str(path)],
+                             capture_output=True, check=False).returncode == 0
+    if not ignored and (root / '.git').exists():
+        gitignore = root / '.gitignore'
+        existing = gitignore.read_text() if gitignore.exists() else ''
+        separator = '\n' if existing and not existing.endswith('\n') else ''
+        gitignore.write_text(f'{existing}{separator}.scratch/\n')
+        print(f'Added .scratch/ to {gitignore}')
+    print(path)
+
+
+def claim(file):
+    session_id = own_session_id()
+    path = Path(file).expanduser().resolve()
+    path.write_text(set_owner(path.read_text(), session_id))
+    print(f'{path} is now owned by session {session_id}')
 
 
 def counter_path(session_id):
@@ -111,11 +180,12 @@ def mark_blocked(path, text, items):
 
 
 def stop(event):
-    path, text = active_effort(event.get('cwd') or os.getcwd())
+    session_id = str(event.get('session_id', ''))
+    path, text = active_effort(event.get('cwd') or os.getcwd(), session_id)
     if path is None:
         return None
     items = open_items(text)
-    counter = counter_path(event.get('session_id', 'unknown'))
+    counter = counter_path(session_id)
     if not items:
         counter.unlink(missing_ok=True)
         return None
@@ -141,7 +211,7 @@ def stop(event):
 
 
 def context(event):
-    path, text = active_effort(event.get('cwd') or os.getcwd())
+    path, text = active_effort(event.get('cwd') or os.getcwd(), str(event.get('session_id', '')))
     if path is None:
         return None
     items = open_items(text)
@@ -152,6 +222,9 @@ def context(event):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] in ('new', 'claim'):
+        (new if sys.argv[1] == 'new' else claim)(sys.argv[2])
+        return 0
     if len(sys.argv) != 2 or sys.argv[1] not in ('stop', 'context'):
         print(__doc__, file=sys.stderr)
         return 2

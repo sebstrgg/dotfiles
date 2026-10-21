@@ -24,7 +24,8 @@ next step. Link specs, tickets and commits instead of copying them.
   unattended continuation, `claude -p` started detached.
 - Give the runtime, model and effort per `delegate`.
 
-Prompt, at most 10 lines: the effort file path, "resume from Next", and any
+Prompt, at most 10 lines: the effort file path, "run
+`~/dotfiles/bin/effort-gate claim <file>` and resume from Next", and any
 rule specific to this effort that the global and repository instructions do
 not carry. Do not restate global instructions.
 

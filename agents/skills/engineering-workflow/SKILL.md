@@ -14,15 +14,20 @@ unless a change is requested.
 ## 1. Intake
 
 - Gather context: repository instructions, docs and ADRs, and any active
-  `.scratch/*/effort.md` for this work. An active effort file is the resume
-  point: continue from its next step.
-- Write the effort file at `.scratch/<effort>/effort.md` from
-  [the template](templates/effort.md), with `checkout:` set to this checkout's
-  absolute path. Make sure `.scratch/` is gitignored.
-- Scale to the risk. A low-risk change finished in one sitting (no reserved
-  action, no persisted data, easy to revert) skips the effort file, planning
-  and the fresh verifier: make it, check it once on the real target, report
-  the evidence.
+  `.scratch/*/effort.md` for this work. Taking an effort over (resuming or
+  continuing it): run `~/dotfiles/bin/effort-gate claim <file>` and continue
+  from its next step. A delegated agent works its brief and leaves the file to
+  its owner.
+- Scale to the risk. Skip the effort file, planning and the fresh verifier
+  only when all of these hold: the change finishes in this sitting, no part of
+  the request awaits Sebastian's approval or decision, no data is persisted or
+  migrated, and one revert undoes it. Then make it, check it once on the real
+  target and report the evidence.
+- Otherwise create the effort file with
+  `~/dotfiles/bin/effort-gate new <effort>`: it copies
+  [the template](templates/effort.md) to `.scratch/<effort>/effort.md`, records
+  this checkout and session as its owner and gitignores `.scratch/`. Then fill
+  it in.
 - A clear request is the approved brief. Otherwise ask once: numbered questions,
   each with your recommendation. For a new project, or a big feature with
   unsettled intent, run `grilling` until the brief's "done when" list is
@@ -102,8 +107,8 @@ again. Verification is complete when every item passes.
 
 ## Staying on course
 
-- The stop gate blocks ending a turn while the active effort file has open
-  items. To stop legitimately, set `status: blocked` with the blocker recorded,
+- The stop gate blocks the session named in `session:` from ending a turn
+  while the effort file has open items; other sessions are never gated. To stop legitimately, set `status: blocked` with the blocker recorded,
   or `status: done` after `verify` passes.
 - Keep the effort file current whenever a decision, approval, item status or
   next step changes. After compaction it is the source of truth.

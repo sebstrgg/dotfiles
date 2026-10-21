@@ -183,9 +183,10 @@ machine. Start a new agent session after installation.
 - **Effort files.** Work state lives in `.scratch/<effort>/effort.md` in the
   project (gitignored), from
   [the template](agents/skills/engineering-workflow/templates/effort.md).
-  [`bin/effort-gate`](bin/effort-gate) keeps an agent from ending its turn
-  while that file has unfinished "done when" items, and points the agent back
-  at the file after context compaction. It runs as the Stop and post-compaction
+  [`bin/effort-gate`](bin/effort-gate) keeps the owning session (front matter
+  `session:`) from ending its turn while that file has unfinished "done when"
+  items, and points it back at the file after context compaction. Verifiers
+  and workers in the same checkout are not gated. It runs as the Stop and post-compaction
   hook in both runtimes (`claude/settings.json`, `codex/hooks.json`; Codex asks
   once to trust new hooks via `/hooks`). Tests: `python3 tests/effort-gate.test.py`.
 - **Tripwires.** `claude/settings.json` denies, and

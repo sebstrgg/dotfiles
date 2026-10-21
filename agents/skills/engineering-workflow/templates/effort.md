@@ -1,6 +1,7 @@
 ---
 status: active
-checkout: /absolute/path/of/the/orchestrating/checkout
+checkout: set by effort-gate new
+session: set by effort-gate new or claim
 ---
 
 # <Effort title>
