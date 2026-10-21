@@ -277,6 +277,57 @@ class EffortGate(unittest.TestCase):
         finally:
             counter.rmdir()
 
+    def test_unreadable_close_marker_lets_the_stop_through(self):
+        path = self.write_effort(status='done', first='pass', not_approved='Going public.')
+        marker = path.parent / '.close-question'
+        marker.write_text('')
+        marker.chmod(0o200)
+        try:
+            self.assertIsNone(self.run_gate('stop', last='Done.'))
+        finally:
+            marker.chmod(0o600)
+
+    def test_stall_warning_names_the_reserved_actions(self):
+        self.write_effort(not_approved='Going public.')
+        outputs = [self.run_gate('stop') for _ in range(6)]
+        self.assertIn('Going public', outputs[5]['systemMessage'])
+
+    def test_bold_text_is_an_action_and_bold_labels_end_the_list(self):
+        path = self.write_effort(status='done', first='pass')
+        path.write_text(path.read_text().replace(
+            '**Not approved:** None.',
+            '**Not approved:**\n**Publishing to npm** and its README\n\n**Budget:** today'))
+        reason = self.run_gate('stop', last='Done.')['reason']
+        self.assertIn('Publishing to npm', reason)
+        self.assertNotIn('today', reason)
+        self.session = str(uuid.uuid4())
+        path = self.write_effort(status='done', first='pass')
+        path.write_text(path.read_text().replace(
+            '**Not approved:** None.', '- **Not approved:** None.\n- **Budget:** today'))
+        self.assertIsNone(self.run_gate('stop', last='Done.'))
+
+    def test_question_mark_in_fenced_code_is_not_a_question(self):
+        self.write_effort(status='done', first='pass', not_approved='Going public.')
+        last = 'Done. To list them:\n\n```\njq ".items[]?" report.json\n```'
+        self.assertEqual(self.run_gate('stop', last=last)['decision'], 'block')
+
+    def test_question_after_a_link_is_a_question(self):
+        self.write_effort(status='done', first='pass', not_approved='Going public.')
+        last = 'Done.\n\nPublish [the preview](https://example.test/preview)? I recommend yes.'
+        self.assertIsNone(self.run_gate('stop', last=last))
+
+    def test_unusable_stall_counter_warns_instead_of_holding(self):
+        name = hashlib.sha256(self.session.encode()).hexdigest()[:16]
+        counter = Path(tempfile.gettempdir()) / 'effort-gate' / name
+        counter.mkdir(parents=True)
+        try:
+            self.write_effort(status='done')
+            output = self.run_gate('stop')
+            self.assertNotIn('decision', output)
+            self.assertIn('cannot keep its stop counter', output['systemMessage'])
+        finally:
+            counter.rmdir()
+
     def test_waiting_mid_effort_is_not_a_close(self):
         self.write_effort(task='| Export | Bash | bg-1 | main | running |',
                           not_approved='Going public.')
