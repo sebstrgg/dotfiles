@@ -26,7 +26,8 @@ unless a change is requested.
   writes only inside this checkout. It copies
   [the template](templates/effort.md) to `.scratch/<effort>/effort.md`,
   records this checkout and session as its owner and gitignores `.scratch/`.
-  Then fill it in, keeping the template's structure: the stop gate and
+  Fill in its brief and "done when" list now, before any product edit or
+  background job, keeping the template's structure: the stop gate and
   compaction hook read only files it created or claimed.
 - A clear request is the approved brief. Otherwise ask once: numbered questions,
   each with your recommendation. For a new project, or a big feature with
