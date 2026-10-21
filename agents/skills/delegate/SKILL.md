@@ -47,6 +47,8 @@ diagnosis Sol couldn't crack, and cross-family review.
   Claude reviews that rendering before it counts.
 - A delegated agent works its brief and reports back. It does not start second
   opinions, reviews or further delegation; the orchestrator decides those.
+- Workers make no paid or metered calls (`claude -p`, model APIs). Only the
+  orchestrator spends, within what Sebastian approved.
 - Lanes do not overlap: one writer per file or resource.
 - Workers commit locally. The orchestrator pushes, opens the pull request and
   starts CI, batching reviewed work into one PR.
@@ -100,6 +102,8 @@ diagnosis Sol couldn't crack, and cross-family review.
   resume it.
 - Reviews and probes run read-only. Full access only when the task needs Docker
   or network, never for reviews.
-- Codex reaches Claude with `claude -p --model <model>`, or the interface's
-  delegation tool when one is available.
+- A Codex orchestrator reaches Claude with `claude -p --model <model>`, or the
+  interface's delegation tool when one is available. Lanes never do: start
+  each `codex exec` with `CLAUDE_CONFIG_DIR` set to an empty folder and
+  `ANTHROPIC_API_KEY` unset, which leaves `claude` signed out.
 - Use one shared brief file plus a short per-task prompt.
