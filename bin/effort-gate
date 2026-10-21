@@ -8,8 +8,9 @@
                             active effort file has open "done when" items.
   effort-gate context       Compaction hook: point the agent back at the file.
 
-An effort file is `.scratch/<effort>/effort.md` with front matter `status: active`,
-`checkout:` equal to this checkout and `session:` naming the owning session. Only
+An effort file is `.scratch/<effort>/effort.md` with front matter `status: active`
+(or `done`, which is held too while an item is unfinished), `checkout:` equal to
+this checkout and `session:` naming the owning session. Only
 the owner is gated: verifiers and workers running in the same checkout, and
 copies of the file in other worktrees, never match.
 After MAX_IDENTICAL_BLOCKS stops without progress the gate stops blocking: it
@@ -77,6 +78,7 @@ def front_matter(text):
 
 
 FINISHED = {'pass', 'blocked'}
+GATED = {'active', 'done'}  # `done` with an unfinished item is not done
 
 
 def table(text, section):
@@ -262,7 +264,7 @@ def mark_blocked(path, text, items):
     """Set `status: blocked` and record the stall, so the effort reads as stuck."""
     note = (f'- The agent stopped {MAX_IDENTICAL_BLOCKS} times without progress on: '
             f'{"; ".join(items)}. Needs a new approach or Sebastian.')
-    text = re.sub(r'^status:[ \t]*active[ \t]*$', 'status: blocked', text, count=1, flags=re.MULTILINE)
+    text = re.sub(r'^status:.*$', 'status: blocked', text, count=1, flags=re.MULTILINE)
     heading = re.search(r'^## Blockers[ \t]*\n', text, flags=re.MULTILINE)
     if heading:
         rest = re.sub(r'^\s*None\.[ \t]*\n', '', text[heading.end():], count=1)
@@ -276,7 +278,7 @@ def stop(event, runtime=None):
     session_id = str(event.get('session_id', ''))
     efforts = owned_efforts(event.get('cwd') or os.getcwd(), session_id)
     for path, text, status in efforts:
-        items = open_items(text) if status == 'active' else []
+        items = open_items(text) if status in GATED else []
         if items:
             return hold(path, text, items, session_id, runtime)
     counter_path(session_id).unlink(missing_ok=True)

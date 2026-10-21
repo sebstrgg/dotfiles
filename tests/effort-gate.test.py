@@ -162,13 +162,27 @@ class EffortGate(unittest.TestCase):
             self.write_effort(first=status)
             self.assertEqual(self.run_gate('stop')['decision'], 'block', status)
 
-    def test_blocked_or_done_status_allows_stop(self):
-        for status in ('blocked', 'done'):
-            self.write_effort(status=status)
-            self.assertIsNone(self.run_gate('stop'), status)
+    def test_blocked_status_allows_stop(self):
+        self.write_effort(status='blocked')
+        self.assertIsNone(self.run_gate('stop'))
+
+    def test_done_with_an_unfinished_item_is_still_held(self):
+        for first in ('open', 'pass (substitute)'):
+            self.session = str(uuid.uuid4())
+            self.write_effort(status='done', first=first)
+            output = self.run_gate('stop')
+            self.assertEqual(output['decision'], 'block', first)
+            self.assertIn('#1 Login works', output['reason'], first)
+
+    def test_stall_on_a_done_effort_marks_it_blocked(self):
+        path = self.write_effort(status='done')
+        outputs = [self.run_gate('stop') for _ in range(6)]
+        self.assertIn('marked blocked', outputs[5]['systemMessage'])
+        self.assertIn('status: blocked\n', path.read_text())
+        self.assertIsNone(self.run_gate('stop'))
 
     def test_close_asks_each_reserved_action_once(self):
-        self.write_effort(status='done', not_approved='Making the repository public.')
+        self.write_effort(status='done', first='pass', not_approved='Making the repository public.')
         output = self.run_gate('stop', last='Done: all items pass.\n\nPublic release remains your call.')
         self.assertEqual(output['decision'], 'block')
         self.assertIn('Making the repository public', output['reason'])
@@ -177,7 +191,7 @@ class EffortGate(unittest.TestCase):
         self.assertIsNone(self.run_gate('stop', last='Anything else.'))
 
     def test_close_report_that_already_asks_is_not_held(self):
-        self.write_effort(status='done', not_approved='Rotating the exposed token.')
+        self.write_effort(status='done', first='pass', not_approved='Rotating the exposed token.')
         last = ('Done.\n\n- Rotate the token exposed in weather.py (commit f932687)? '
                 'I recommend yes.\n\nLeft behind: nothing.')
         self.assertIsNone(self.run_gate('stop', last=last))
@@ -189,7 +203,7 @@ class EffortGate(unittest.TestCase):
             self.assertEqual(self.run_gate('stop', last='All done.')['decision'], 'block', status)
 
     def test_reserved_actions_listed_as_bullets_are_read(self):
-        path = self.write_effort(status='done')
+        path = self.write_effort(status='done', first='pass')
         path.write_text(path.read_text().replace(
             '**Not approved:** None.', '**Not approved:**\n\n- Going public\n- Tagging v1.0.0'))
         reason = self.run_gate('stop', last='Done.')['reason']
@@ -197,7 +211,7 @@ class EffortGate(unittest.TestCase):
         self.assertIn('Tagging v1.0.0', reason)
 
     def test_changed_reserved_actions_are_asked_again(self):
-        path = self.write_effort(status='done', not_approved='Going public; tagging v1.0.0.')
+        path = self.write_effort(status='done', first='pass', not_approved='Going public; tagging v1.0.0.')
         self.run_gate('stop', last='Done.')
         path.write_text(path.read_text().replace('Going public; tagging', 'Tagging'))
         self.assertEqual(self.run_gate('stop', last='Tagged.')['decision'], 'block')
@@ -205,13 +219,14 @@ class EffortGate(unittest.TestCase):
     def test_no_reserved_actions_closes_without_a_question(self):
         for not_approved in ('None.', 'none', ''):
             self.session = str(uuid.uuid4())
-            self.write_effort(status='done', not_approved=not_approved)
+            self.write_effort(status='done', first='pass', not_approved=not_approved)
             self.assertIsNone(self.run_gate('stop', last='Done.'), not_approved)
 
     def test_template_prompt_is_not_a_reserved_action(self):
         self.run_command('new', 'login', env_ids={'CODEX_THREAD_ID': self.session})
         path = self.repo / '.scratch' / 'login' / 'effort.md'
-        path.write_text(path.read_text().replace('status: active', 'status: done'))
+        path.write_text(path.read_text().replace('status: active', 'status: done')
+                        .replace('| open |', '| pass |'))
         self.assertIsNone(self.run_gate('stop', last='Done.'))
 
     def test_waiting_mid_effort_is_not_a_close(self):
@@ -220,7 +235,7 @@ class EffortGate(unittest.TestCase):
         self.assertIsNone(self.run_gate('stop', runtime='claude', last='Waiting for the export.'))
 
     def test_other_sessions_are_never_asked_to_close(self):
-        self.write_effort(status='done', not_approved='Going public.')
+        self.write_effort(status='done', first='pass', not_approved='Going public.')
         self.assertIsNone(self.run_gate('stop', session=str(uuid.uuid4()), last='Done.'))
 
     def test_copy_in_another_checkout_is_ignored(self):

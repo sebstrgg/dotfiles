@@ -96,12 +96,13 @@ in the effort file.
 Dispatch a fresh agent to run `verify` against the "done when" list on the real
 target (after deploy when the outcome lives on a deployed service), from the
 other model family: write its prompt to `.scratch/<effort>/runs/<run>/prompt.md`
-and run `~/dotfiles/bin/agent-run start codex verify <run-dir>` from Claude, or
-`start claude verify` from Codex, then `agent-run wait <run-dir>`. Every
-approved brief includes this dispatch. Fix what fails against the list and
-verify again; a finding outside the list goes into the report as a
-recommendation, not another round. Verification is complete when every item
-passes.
+(the effort file and how to reach the target; every verdict is the
+verifier's) and run `~/dotfiles/bin/agent-run start codex verify <run-dir>`
+from Claude, or `start claude verify` from Codex, then `agent-run wait
+<run-dir>`. Every approved brief includes this dispatch. Fix what fails against
+the agreed list and verify again; a finding outside it goes into the report as
+a recommendation, not a new item or another round. Verification is complete
+when every item passes.
 
 ## 7. Close
 
@@ -124,8 +125,9 @@ passes.
 - The stop gate blocks the session named in `session:` from ending a turn
   while the effort file has open items; other sessions are never gated. To
   stop legitimately, set `status: blocked` with the blocker recorded, or
-  `status: done` after `verify` passes. At close it holds the owner once more
-  if "Not approved" lists actions and the report asks nothing.
+  `status: done` after `verify` passes (`done` with an unfinished item is
+  still held). At close it holds the owner once more if "Not approved" lists
+  actions and the report asks nothing.
 - Waiting on a job or agent: record it under "Running tasks" with state
   `running`. Claude waits through a background command (the job itself, or
   `agent-run wait <run-dir>`) and ends its turn; it is woken when that command
