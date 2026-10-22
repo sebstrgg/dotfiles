@@ -8,6 +8,9 @@
   shared CI farm and cancels the previous one. Mark the PR ready once, on the
   commit `effort-gate release` marked (SKILL.md step 4), in its own command
   after the push.
+- In Codex, start a `git push` or `gh pr`, `gh workflow` or `gh run` command
+  with `cd <checkout> &&`: Codex leaves the shell tool's workdir out of what
+  the tripwire sees.
 - Deploy once per release. Walks and verification findings go back into the
   local loop, so a round of fixes never costs a CI run, a deploy and a pin
   change of its own.
