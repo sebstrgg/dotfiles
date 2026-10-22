@@ -7,6 +7,10 @@
   effort-gate stop [claude] Stop hook: block ending the turn while the session's
                             active effort file has open "done when" items.
   effort-gate context       Compaction hook: point the agent back at the file.
+  effort-gate release <why> Mark this checkout's HEAD commit as a release: the
+                            one commit allowed a full run on the shared CI farm
+                            (bin/agent-tripwire holds every other), recorded
+                            under "## CI runs" in the session's active effort.
 
 An effort file is `.scratch/<effort>/effort.md` with front matter `status: active`
 (or `done`, which is held too while an item is unfinished), `checkout:` naming
@@ -530,8 +534,67 @@ def context(event):
                                    'additionalContext': message}}
 
 
+def git(root, *args):
+    return subprocess.run(['git', '-C', str(root), *args],
+                          capture_output=True, text=True, check=False)
+
+
+def add_ci_run(text, row):
+    """`text` with `row` appended to the "## CI runs" table, adding the section
+    before "## Decisions" (or at the end) in an effort file that predates it."""
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip().lower() == '## ci runs'), None)
+    if start is None:
+        section = ['## CI runs', '', '| Commit | Started | Why it is the release |',
+                   '|---|---|---|', row, '']
+        at = next((i for i, line in enumerate(lines) if line.strip().lower() == '## decisions'),
+                  len(lines))
+        lines[at:at] = section
+    else:
+        end = start + 1
+        while end < len(lines) and not lines[end].startswith('## '):
+            end += 1
+        last = max((i for i in range(start, end) if lines[i].strip().startswith('|')), default=None)
+        if last is None:
+            lines[start + 1:start + 1] = ['', '| Commit | Started | Why it is the release |',
+                                          '|---|---|---|', row]
+        else:
+            lines.insert(last + 1, row)
+    return '\n'.join(lines) + '\n'
+
+
+def release(why):
+    """Record HEAD as the commit allowed one full CI run. A dirty tree is refused:
+    CI would test something other than what the checkout holds."""
+    root = checkout_root(os.getcwd())
+    head = git(root, 'rev-parse', 'HEAD').stdout.strip()
+    if not head:
+        sys.exit('effort-gate: release needs a git checkout with a commit')
+    if git(root, 'status', '--porcelain', '--untracked-files=no').stdout.strip():
+        sys.exit('effort-gate: uncommitted changes; commit the whole release first')
+    common = Path(git(root, 'rev-parse', '--path-format=absolute', '--git-common-dir').stdout.strip())
+    started = datetime.now().astimezone().strftime('%Y-%m-%d %H:%M %Z')
+    why = ' '.join(why.split()).replace('|', '\\|')
+    with open(common / 'agent-ci-release', 'a') as marks:
+        marks.write(f'{head}\t{started}\t{why}\n')
+    session_id = None
+    with contextlib.suppress(SystemExit):
+        session_id = own_session_id()
+    path, text = active_effort(root, session_id)
+    if path:
+        path.write_text(add_ci_run(text, f'| {head[:12]} | {started} | {why} |'))
+    print(f'{head[:12]} may start one full CI run'
+          + (f'; recorded in {path}' if path else ''))
+
+
 def main():
     role = os.environ.get('AGENT_RUN_ROLE')
+    if len(sys.argv) == 3 and sys.argv[1] == 'release':
+        if role:
+            sys.exit(f'effort-gate: this is a delegated {role} run (AGENT_RUN_ROLE). Starting a '
+                     'full CI run is the orchestrator\'s call: push to a draft and report.')
+        release(sys.argv[2])
+        return 0
     if len(sys.argv) == 3 and sys.argv[1] in ('new', 'claim'):
         if role:
             sys.exit(f'effort-gate: this is a delegated {role} run (AGENT_RUN_ROLE). The effort '

@@ -1,21 +1,119 @@
 #!/usr/bin/env python3
 """Behaviour of bin/agent-tripwire through its PreToolUse hook interface."""
 import json
+import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
 TRIPWIRE = Path(__file__).resolve().parents[1] / 'bin' / 'agent-tripwire'
 
 
-def decide(command, tool='Bash'):
-    payload = {'hook_event_name': 'PreToolUse', 'tool_name': tool,
-               'tool_input': {'command': command}}
-    result = subprocess.run(['python3', str(TRIPWIRE)], input=json.dumps(payload),
-                            capture_output=True, text=True, check=True)
+def decide(command, tool='Bash', cwd=None, env=None):
+    """The hook's decision for `command`, run from `cwd` (a scratch folder outside
+    any repository unless given)."""
+    with tempfile.TemporaryDirectory() as outside:
+        payload = {'hook_event_name': 'PreToolUse', 'tool_name': tool, 'cwd': str(cwd or outside),
+                   'tool_input': {'command': command}}
+        result = subprocess.run(['python3', str(TRIPWIRE)], input=json.dumps(payload),
+                                capture_output=True, text=True, check=True, env=env)
     if not result.stdout.strip():
         return 'allow'
     return json.loads(result.stdout)['hookSpecificOutput']['permissionDecision']
+
+
+def git(repo, *args):
+    return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+class FullCiRun(unittest.TestCase):
+    """A checkout with workflows, an `origin` whose default branch is main, and a
+    fake `gh` that reports the pull request on `feature` as draft or ready."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name).resolve()
+        self.repo, origin, bin_dir = root / 'repo', root / 'origin.git', root / 'bin'
+        subprocess.run(['git', 'init', '-q', '--bare', '-b', 'main', str(origin)], check=True)
+        subprocess.run(['git', 'init', '-q', '-b', 'main', str(self.repo)], check=True)
+        (self.repo / '.github' / 'workflows').mkdir(parents=True)
+        (self.repo / '.github' / 'workflows' / 'ci.yml').write_text('on: push\n')
+        git(self.repo, 'add', '.')
+        git(self.repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'start')
+        git(self.repo, 'remote', 'add', 'origin', str(origin))
+        git(self.repo, 'push', '-q', 'origin', 'main')
+        git(self.repo, 'remote', 'set-head', 'origin', 'main')
+        git(self.repo, 'switch', '-qc', 'feature')
+        bin_dir.mkdir()
+        self.draft = root / 'draft'
+        gh = bin_dir / 'gh'
+        gh.write_text(f'''#!/bin/sh
+case "$1 $2" in
+  "pr view") case "$*" in
+    *headRefOid*) git rev-parse HEAD ;;
+    *) if [ -e {self.draft} ]; then echo "OPEN true"; else echo "OPEN false"; fi ;;
+  esac ;;
+  "run view") git rev-parse HEAD ;;
+  *) exit 1 ;;
+esac
+''')
+        gh.chmod(0o755)
+        self.env = {**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}'}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def decide(self, command):
+        return decide(command, cwd=self.repo, env=self.env)
+
+    def release(self):
+        marks = Path(git(self.repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
+        with open(marks / 'agent-ci-release', 'a') as file:
+            file.write(f'{git(self.repo, "rev-parse", "HEAD")}\t2026-10-22 16:30 CEST\tdone\n')
+
+    def test_every_command_that_starts_a_full_run_is_held_until_released(self):
+        commands = ('git push origin HEAD:main', 'git push origin feature', 'git push',
+                    'git -C . push -u origin feature', 'gh pr ready', 'gh pr ready 12',
+                    'gh pr create --fill', 'gh workflow run ci.yml', 'gh run rerun 123',
+                    'cargo fmt --check && gh pr ready')
+        for command in commands:
+            self.assertEqual(self.decide(command), 'deny', command)
+        self.release()
+        for command in commands:
+            self.assertEqual(self.decide(command), 'allow', command)
+
+    def test_a_new_commit_needs_its_own_release(self):
+        self.release()
+        git(self.repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q',
+            '--allow-empty', '-m', 'another round')
+        self.assertEqual(self.decide('git push origin feature'), 'deny')
+
+    def test_iteration_on_a_draft_passes(self):
+        self.draft.touch()
+        for command in ('git push origin feature', 'git push', 'gh pr create --draft --fill',
+                        'gh pr create -d', 'gh pr ready --undo', 'gh pr view',
+                        'git push origin :old-branch', 'git push --tags'):
+            self.assertEqual(self.decide(command), 'allow', command)
+
+    def test_a_push_to_main_is_held_even_while_the_pull_request_is_draft(self):
+        self.draft.touch()
+        self.assertEqual(self.decide('git push origin feature:main'), 'deny')
+
+    def test_the_reason_names_the_release_command(self):
+        payload = {'hook_event_name': 'PreToolUse', 'tool_name': 'Bash', 'cwd': str(self.repo),
+                   'tool_input': {'command': 'gh pr ready'}}
+        output = json.loads(subprocess.run(['python3', str(TRIPWIRE)], input=json.dumps(payload),
+                                           capture_output=True, text=True, check=True,
+                                           env=self.env).stdout)
+        self.assertIn('effort-gate release', output['hookSpecificOutput']['permissionDecisionReason'])
+
+    def test_a_checkout_without_workflows_passes(self):
+        git(self.repo, 'rm', '-rq', '.github')
+        git(self.repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'no ci')
+        for command in ('git push origin HEAD:main', 'gh pr ready'):
+            self.assertEqual(self.decide(command), 'allow', command)
 
 
 class AgentTripwire(unittest.TestCase):

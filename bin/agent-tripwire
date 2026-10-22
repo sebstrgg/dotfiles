@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""PreToolUse hook for Claude Code and Codex: refuse a force-push, and a process
-listing that would copy process arguments into the transcript.
+"""PreToolUse hook for Claude Code and Codex: refuse a force-push, a process
+listing that would copy process arguments into the transcript, and a full run on
+the shared CI farm for a commit not marked as a release.
 
 Reads the hook event on stdin. For a shell command that runs `git push` with
 `--force`, `--mirror`, `-f` (alone or in a short-flag group) or a `+refspec`, it
@@ -11,6 +12,14 @@ environments as arguments, and a listing filtered through grep still carries
 them. `ps` flags read differently per platform and mode, so only one plain
 names-only form passes. Every other call passes silently.
 
+A full CI run starts with `gh pr ready`, `gh pr create` without `--draft`,
+`gh workflow run`, `gh run rerun`, and a `git push` to the default branch or to
+the branch of a ready pull request. In a checkout with `.github/workflows`, such
+a command passes only for a commit `effort-gate release` marked (listed in the
+repository's `agent-ci-release` file), so CI runs once on a finished change
+rather than on every round of iteration. When git or gh cannot say what the
+command targets, it passes.
+
 Permission rules match command text by position, so a force flag after the
 remote, or `git -C <dir>` in front, slipped past them; this reads the words of
 each simple command instead, skipping here-document bodies and comments. It is a
@@ -20,7 +29,9 @@ runs.
 import json
 import re
 import shlex
+import subprocess
 import sys
+from pathlib import Path
 
 OPERATOR_CHARS = '();<>|&`'
 GIT_OPTIONS_WITH_VALUE = {'-C', '-c', '--git-dir', '--work-tree', '--namespace'}
@@ -249,6 +260,137 @@ def lists_arguments(words):
     return not formats or not fields <= PS_NAME_FIELDS
 
 
+def run(cwd, *command):
+    """Stripped stdout of `command`, or '' when it fails or is unavailable."""
+    try:
+        result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=8,
+                                check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+    return result.stdout.strip() if result.returncode == 0 else ''
+
+
+def git_cwd(words, cwd):
+    """The directory a `git` command runs in, its words after the global options."""
+    rest = words[1:]
+    while rest and rest[0].startswith('-'):
+        if rest[0] == '-C' and len(rest) > 1:
+            cwd = str(Path(cwd, rest[1]))
+        rest = rest[2:] if rest[0] in GIT_OPTIONS_WITH_VALUE else rest[1:]
+    return cwd, rest
+
+
+def pushed_refs(rest, cwd):
+    """(source, destination branch) for each branch a `git push` updates."""
+    positional, arguments = [], iter(rest[1:])
+    for word in arguments:
+        if word in ('--all', '--tags', '--mirror', '--delete', '-d'):
+            return []
+        if word in PUSH_OPTIONS_WITH_VALUE:
+            next(arguments, None)
+        elif not word.startswith('-'):
+            positional.append(word)
+    current = run(cwd, 'git', 'symbolic-ref', '--short', '-q', 'HEAD')
+    refs = []
+    for spec in positional[1:] or ['HEAD']:
+        source, _, destination = spec.partition(':')
+        if not source:
+            continue  # `:branch` deletes it
+        destination = destination or source
+        if destination == 'HEAD':
+            destination = current
+        refs.append((source, destination.removeprefix('refs/heads/')))
+    return refs
+
+
+def ready_pull_request(branch, cwd):
+    state = run(cwd, 'gh', 'pr', 'view', branch, '--json', 'state,isDraft',
+                '--jq', '.state + " " + (.isDraft | tostring)')
+    return state == 'OPEN false'
+
+
+def option(words, *names):
+    return any(word in names or word.split('=', 1)[0] in names for word in words)
+
+
+def operand(words, options_with_value=()):
+    """The first argument after a gh subcommand, skipping options and their values."""
+    arguments = iter(words)
+    for word in arguments:
+        if word in options_with_value:
+            next(arguments, None)
+        elif not word.startswith('-'):
+            return word
+    return None
+
+
+def full_ci_start(words, cwd):
+    """(what starts the run, the commit it tests) when `words` starts a full CI run
+    in a checkout with workflows; None otherwise. The commit is None when it cannot
+    be read."""
+    words = strip_prefix(words)
+    if not words:
+        return None
+    name = words[0].rsplit('/', 1)[-1]
+    if name == 'git':
+        cwd, rest = git_cwd(words, cwd)
+        if not rest or rest[0] != 'push' or not workflows(cwd):
+            return None
+        default = run(cwd, 'git', 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD')
+        default = default.split('/', 1)[-1] if default else None
+        for source, destination in pushed_refs(rest, cwd):
+            if destination in (default, 'main', 'master'):
+                what = f'a push to {destination}'
+            elif destination and ready_pull_request(destination, cwd):
+                what = f'a push to ready pull request {destination}'
+            else:
+                continue
+            return what, run(cwd, 'git', 'rev-parse', '--verify', '-q', f'{source}^{{commit}}')
+        return None
+    if name != 'gh' or len(words) < 3 or not workflows(cwd):
+        return None
+    group, command, arguments = words[1], words[2], words[3:]
+    head = run(cwd, 'git', 'rev-parse', 'HEAD') or None
+    if (group, command) == ('pr', 'ready') and not option(arguments, '--undo'):
+        target = operand(arguments, {'-R', '--repo'})
+        oid = run(cwd, 'gh', 'pr', 'view', *([target] if target else []), '--json', 'headRefOid',
+                  '--jq', '.headRefOid')
+        return 'marking the pull request ready', oid or head
+    if (group, command) == ('pr', 'create') and not option(arguments, '--draft', '-d'):
+        return 'a pull request opened ready for review', head
+    if (group, command) == ('workflow', 'run'):
+        return 'a manual workflow run', head
+    if (group, command) == ('run', 'rerun'):
+        target = operand(arguments, {'-R', '--repo', '-j', '--job'})
+        sha = run(cwd, 'gh', 'run', 'view', target, '--json', 'headSha', '--jq', '.headSha') \
+            if target else ''
+        return 'a re-run', sha or head
+    return None
+
+
+def workflows(cwd):
+    root = run(cwd, 'git', 'rev-parse', '--show-toplevel')
+    folder = Path(root, '.github', 'workflows') if root else None
+    return bool(folder and folder.is_dir() and any(folder.glob('*.y*ml')))
+
+
+def released(commit, cwd):
+    marks = run(cwd, 'git', 'rev-parse', '--path-format=absolute', '--git-common-dir')
+    try:
+        lines = Path(marks, 'agent-ci-release').read_text().splitlines() if marks else []
+    except OSError:
+        return False
+    return any(line.split('\t', 1)[0] == commit for line in lines)
+
+
+def unreleased_ci(commands, cwd):
+    for words in commands:
+        start = full_ci_start(words, cwd)
+        if start and start[1] and not released(start[1], cwd):
+            return start
+    return None
+
+
 def shell_text(command):
     """Codex may pass argv (`["bash", "-lc", "<script>"]`); Claude passes a string."""
     if isinstance(command, list):
@@ -276,6 +418,16 @@ def main():
         reason = ('Process arguments can carry secrets, and this listing would copy them into '
                   'the transcript. List names only: `ps -Ao pid,rss,comm`, `pgrep -x <name>`, '
                   'or `pgrep -f <pattern>` for PIDs.')
+    elif (start := unreleased_ci(commands, event.get('cwd') or '.')):
+        what, commit = start
+        reason = (f'{what[0].upper()}{what[1:]} starts a full run on the CI farm every session '
+                  f'shares, and commit {commit[:12]} is not a release. CI is the release gate, '
+                  'not the test loop: iterate on a local build (the fast CI steps, affected '
+                  'tests, the walk, review) until no finding is open, batching every finding '
+                  'into one change. Keep an iterating pull request in draft (`gh pr ready '
+                  '--undo`). When this commit is the release, record it with `python3 '
+                  '~/dotfiles/bin/effort-gate release "<why this commit is the release>"` '
+                  'and run the command again.')
     else:
         return 0
     print(json.dumps({'hookSpecificOutput': {

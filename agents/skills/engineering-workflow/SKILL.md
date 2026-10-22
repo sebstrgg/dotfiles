@@ -76,21 +76,31 @@ because it produces the brief.
   loop.
 - Commit in small meaningful steps; update docs the change touches as you go.
 
-## 4. Prove and review
+## 4. Prove, review and release
 
-Run these in order; each can still change the work, so none waits behind a slow
-check:
+CI is the release gate, not the test loop: every session shares one CI farm,
+so the work iterates on a local build and goes through CI once. Each step can
+still change the work, so none waits behind a slow check:
 
-1. Prove the change has the intended effect on the real target or real data,
-   with the fastest decisive check, and record the evidence in the effort file.
-   For UI that is a visual pass of the rendered app against the version it
-   replaces: passing tests only say it is time for that pass.
-2. Code where a missed bug is expensive (security, auth or secrets, persisted
+1. Prove the change has the intended effect with the fastest decisive check,
+   and record the evidence in the effort file: the real target where the change
+   reaches it without a release (data, configuration, infrastructure), and a
+   local build of the change against a copy of the real state where it ships
+   through CI. For UI that is a visual pass of the rendered app against the
+   version it replaces: passing tests only say it is time for that pass.
+2. Run the CI job's fast steps (lint, format, type and repository-root checks)
+   across the whole repository and every test that exercises changed code,
+   locally.
+3. Code where a missed bug is expensive (security, auth or secrets, persisted
    data, migrations or deletion, concurrency, paid calls, public contracts, a
    large cross-module change) gets one cross-family review
    (`~/dotfiles/bin/agent-run start <codex|claude> review`). Fix confirmed
    findings and re-check once.
-3. Full CI and slow suites run once, on the final change.
+4. Every finding from these steps goes into the same change; repeat them until
+   none is open. The change is then the release: commit all of it, run
+   `~/dotfiles/bin/effort-gate release "<why this commit is the release>"`,
+   and start CI once (mark the draft ready). The tripwire holds any full CI run
+   for a commit without that mark.
 
 Infrastructure and configuration: live readback plus the affected behaviour.
 Docs: compared with their source.
@@ -109,8 +119,9 @@ other model family: write its prompt to `.scratch/<effort>/runs/<run>/prompt.md`
 (the effort file and how to reach the target; every verdict is the
 verifier's) and run `~/dotfiles/bin/agent-run start codex verify <run-dir>`
 from Claude, or `start claude verify` from Codex, then `agent-run wait
-<run-dir>`. Every approved brief includes this dispatch. Fix what fails against
-the agreed list and verify again; a finding outside it goes into the report as
+<run-dir>`. Every approved brief includes this dispatch. Fix everything that
+fails against the agreed list together, through step 4 as one new release, and
+verify again; a finding outside it goes into the report as
 a recommendation, not a new item or another round. Verification is complete
 when every item passes.
 

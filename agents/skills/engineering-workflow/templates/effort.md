@@ -35,6 +35,13 @@ access the real check needs.
 |---|---|---|---|---|
 | 1 | | | open | |
 
+## CI runs
+
+One row per full run on the shared CI farm, written by `effort-gate release`.
+
+| Commit | Started | Why it is the release |
+|---|---|---|
+
 ## Root cause
 
 For a fix: the cause, the evidence that proves it, and why the change removes

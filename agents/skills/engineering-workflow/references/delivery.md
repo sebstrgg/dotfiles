@@ -3,14 +3,14 @@
 ## Branches and pull requests
 
 - One worktree, branch and port block per task.
-- Open pull requests as drafts and keep them in draft while iterating: drafts run
-  only fast checks, and every push to a ready PR starts a full run on the shared
-  CI farm and cancels the previous one. Batch commits locally, push in a few
-  meaningful steps, and mark the PR ready once, when the change is complete and
-  verified.
-- Before pushing, run the CI job's fast steps (lint, format, type and
-  repository-root checks) locally across the whole repository, not only the
-  touched files.
+- Open pull requests as drafts and keep them in draft while iterating: drafts
+  run only fast checks, and every push to a ready PR starts a full run on the
+  shared CI farm and cancels the previous one. Mark the PR ready once, on the
+  commit `effort-gate release` marked (SKILL.md step 4), in its own command
+  after the push.
+- Deploy once per release. Walks and verification findings go back into the
+  local loop, so a round of fixes never costs a CI run, a deploy and a pin
+  change of its own.
 - Merge one at a time into the integration branch through its PR, with green CI
   on a head that contains the integration tip. Read the full `gh pr checks`
   listing, not a watch exit code; a red check, even a known infrastructure

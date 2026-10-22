@@ -678,6 +678,54 @@ class EffortGate(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(f'session: {expected}\n', path.read_text(), runtime)
 
+    def commit_now(self, message='change'):
+        subprocess.run(['git', '-C', str(self.repo), '-c', 'user.name=t', '-c', 'user.email=t@t',
+                        'commit', '-q', '--allow-empty', '-m', message], check=True)
+        return subprocess.run(['git', '-C', str(self.repo), 'rev-parse', 'HEAD'],
+                              capture_output=True, text=True, check=True).stdout.strip()
+
+    def test_release_marks_head_and_records_the_run_in_the_effort(self):
+        path = self.write_effort()
+        head = self.commit_now()
+        result = self.run_command('release', 'walk and review clean on the local build',
+                                  env_ids={'CODEX_THREAD_ID': self.session})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        marks = (self.repo / '.git' / 'agent-ci-release').read_text()
+        self.assertTrue(marks.startswith(f'{head}\t'))
+        self.assertIn('walk and review clean', marks)
+        text = path.read_text()
+        self.assertIn('## CI runs', text)
+        self.assertIn(f'| {head[:12]} |', text)
+        self.assertEqual(self.run_gate('stop')['decision'], 'block')  # the effort still parses
+
+    def test_release_appends_to_an_existing_ci_runs_table(self):
+        path = self.write_effort()
+        path.write_text(path.read_text().replace(
+            '## Running tasks', '## CI runs\n\n| Commit | Started | Why it is the release |\n'
+            '|---|---|---|\n| abc | earlier | first |\n\n## Running tasks'))
+        head = self.commit_now()
+        self.run_command('release', 'second', env_ids={'CODEX_THREAD_ID': self.session})
+        text = path.read_text()
+        self.assertIn(f'| abc | earlier | first |\n| {head[:12]} |', text)
+
+    def test_release_without_an_effort_still_marks_the_commit(self):
+        head = self.commit_now()
+        result = self.run_command('release', 'quick change')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(head, (self.repo / '.git' / 'agent-ci-release').read_text())
+
+    def test_release_refuses_uncommitted_changes_and_delegated_runs(self):
+        (self.repo / 'file').write_text('one')
+        subprocess.run(['git', '-C', str(self.repo), 'add', 'file'], check=True)
+        self.commit_now()
+        (self.repo / 'file').write_text('two')
+        result = self.run_command('release', 'why')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('uncommitted', result.stderr)
+        result = self.run_command('release', 'why', env_ids={'AGENT_RUN_ROLE': 'work'})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.repo / '.git' / 'agent-ci-release').exists())
+
     def test_context_without_effort_is_silent(self):
         self.assertIsNone(self.run_gate('context', event='PostCompact'))
 
