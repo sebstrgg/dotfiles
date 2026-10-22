@@ -200,6 +200,12 @@ esac
         with tempfile.TemporaryDirectory() as session:
             for command in ('git push origin feature:main', 'gh pr ready', 'gh workflow run ci.yml'):
                 self.assertEqual(codex_decide(command, session), 'deny', command)
+            for command in ('cd . && git push origin feature:main', 'git -C . push origin main',
+                            f'git -C {self.repo} status && git push origin main',
+                            'cd sub && gh pr ready'):
+                self.assertEqual(codex_decide(command, session), 'deny', command)
+            self.assertEqual(codex_decide(f'git -C {self.repo} push origin feature:main', session),
+                             'allow')
             self.assertEqual(codex_decide('git status', session), 'allow')
             self.assertEqual(codex_decide('gh pr view', session), 'allow')
         self.assertEqual(codex_decide(f'cd {self.repo} && git push origin feature:main',

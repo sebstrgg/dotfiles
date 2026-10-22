@@ -21,8 +21,8 @@ rather than on every round of iteration. A command for another repository
 (`gh -R`), a push to a remote other than origin, help and dry runs pass, and so
 does any command whose target git or gh cannot name within the lookup budget.
 Codex leaves the shell tool's `workdir` out of
-the event, so in Codex such a command must name its checkout with a leading
-`cd <dir>` or `git -C <dir>`. Commits are read from local refs, a `cd` is followed only at the top level, and
+the event, so in Codex such a command must name its checkout by absolute path, with a
+leading `cd /dir` or `git -C /dir`. Commits are read from local refs, a `cd` is followed only at the top level, and
 `remote.<name>.push` mappings are not read.
 
 Permission rules match command text by position, so a force flag after the
@@ -466,18 +466,28 @@ MOVES_HEAD = {'commit', 'merge', 'rebase', 'cherry-pick', 'revert', 'am', 'pull'
               'switch', 'checkout'}
 
 
+def absolute(path):
+    return path.startswith(('/', '~'))
+
+
 def names_its_directory(commands):
-    """Whether a `cd <dir>` or `git -C <dir>` fixes the directory the commands
-    run in, before any of them could start CI."""
+    """Whether every command that could start CI runs in a checkout the text names
+    absolutely: after a top-level `cd /dir`, or as `git -C /dir push`. A relative
+    path is relative to the directory the event does not carry."""
+    known = False
     for words in commands:
         plain = strip_prefix(words)
         if len(plain) == 2 and plain[0] == 'cd':
-            return True
-        if plain and plain[0].rsplit('/', 1)[-1] == 'git' and '-C' in plain[1:3]:
-            return True
-        if plain and plain[0].rsplit('/', 1)[-1] in ('git', 'gh'):
-            return False
-    return False
+            known = known or absolute(plain[1])
+            continue
+        if could_start_ci(words) and not known:
+            options = plain[1:]
+            directory = next((options[i + 1] for i in range(len(options) - 1)
+                              if options[i] == '-C'), None) \
+                if plain[0].rsplit('/', 1)[-1] == 'git' else None
+            if not (directory and absolute(directory)):
+                return False
+    return True
 
 
 def could_start_ci(words):
@@ -552,7 +562,8 @@ def main():
         # `workdir`, so the checkout a command runs in is unknown unless it says.
         reason = ('Codex does not tell this hook which directory a command runs in, and this '
                   'one may start a run on the shared CI farm. Name the checkout in the command '
-                  'itself: `cd <checkout> && <command>`, or `git -C <checkout> push ...`.')
+                  'itself with an absolute path: `cd /path/to/checkout && <command>`, or `git -C '
+                  '/path/to/checkout push ...`.')
     elif (start := unreleased_ci(commands, event.get('cwd') or '.')):
         what, commit = start
         subject = (f'commit {commit[:12]} is not a release' if commit else
