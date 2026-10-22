@@ -46,6 +46,8 @@ An item fails when:
 - a claimed restoration or fix is contradicted by any current signal;
 - a fix has no proven root cause under "Root cause", or removes the symptom
   while that cause remains (a workaround per the global instructions);
+- the work or its evidence rests on an unchecked premise (an assumption per
+  the global instructions);
 - UI: per the design reference (one-off components, hard-coded values, generic
   tells, copy that reads translated or ignores the voice).
 
