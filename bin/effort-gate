@@ -570,8 +570,8 @@ def release(why):
     head = git(root, 'rev-parse', 'HEAD').stdout.strip()
     if not head:
         sys.exit('effort-gate: release needs a git checkout with a commit')
-    if git(root, 'status', '--porcelain', '--untracked-files=no').stdout.strip():
-        sys.exit('effort-gate: uncommitted changes; commit the whole release first')
+    if git(root, 'status', '--porcelain', '--', '.', ':(exclude).scratch').stdout.strip():
+        sys.exit('effort-gate: uncommitted or untracked files; commit the whole release first')
     common = Path(git(root, 'rev-parse', '--path-format=absolute', '--git-common-dir').stdout.strip())
     started = datetime.now().astimezone().strftime('%Y-%m-%d %H:%M %Z')
     why = ' '.join(why.split()).replace('|', '\\|')

@@ -24,6 +24,16 @@ def decide(command, tool='Bash', cwd=None, env=None):
     return json.loads(result.stdout)['hookSpecificOutput']['permissionDecision']
 
 
+def codex_decide(command, cwd):
+    """Decision for a Codex event, which carries `turn_id` and the session's cwd."""
+    payload = {'hook_event_name': 'PreToolUse', 'tool_name': 'Bash', 'turn_id': 't',
+               'cwd': str(cwd), 'tool_input': {'command': command}}
+    result = subprocess.run(['python3', str(TRIPWIRE)], input=json.dumps(payload),
+                            capture_output=True, text=True, check=True)
+    return json.loads(result.stdout)['hookSpecificOutput']['permissionDecision'] \
+        if result.stdout.strip() else 'allow'
+
+
 def git(repo, *args):
     return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, text=True,
                           check=True).stdout.strip()
@@ -184,6 +194,16 @@ esac
         started = time.monotonic()
         self.assertEqual(self.decide('git push origin feature:a feature:b feature:c'), 'allow')
         self.assertLess(time.monotonic() - started, 9)
+
+    def test_codex_names_the_checkout_of_a_command_that_could_start_ci(self):
+        self.release()
+        with tempfile.TemporaryDirectory() as session:
+            for command in ('git push origin feature:main', 'gh pr ready', 'gh workflow run ci.yml'):
+                self.assertEqual(codex_decide(command, session), 'deny', command)
+            self.assertEqual(codex_decide('git status', session), 'allow')
+            self.assertEqual(codex_decide('gh pr view', session), 'allow')
+        self.assertEqual(codex_decide(f'cd {self.repo} && git push origin feature:main',
+                                      self.repo), 'allow')
 
     def test_a_checkout_without_workflows_passes(self):
         git(self.repo, 'rm', '-rq', '.github')

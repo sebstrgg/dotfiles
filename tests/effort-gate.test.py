@@ -722,6 +722,12 @@ class EffortGate(unittest.TestCase):
         result = self.run_command('release', 'why')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('uncommitted', result.stderr)
+        subprocess.run(['git', '-C', str(self.repo), 'checkout', '-q', 'file'], check=True)
+        (self.repo / 'new_source.py').write_text('')
+        self.assertNotEqual(self.run_command('release', 'why').returncode, 0)
+        (self.repo / 'new_source.py').unlink()
+        self.assertEqual(self.run_command('release', 'why').returncode, 0)  # .scratch/ is ignored
+        (self.repo / '.git' / 'agent-ci-release').unlink()
         result = self.run_command('release', 'why', env_ids={'AGENT_RUN_ROLE': 'work'})
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.repo / '.git' / 'agent-ci-release').exists())
