@@ -17,8 +17,9 @@ A full CI run starts with `gh pr ready`, `gh pr create` without `--draft`,
 the branch of a ready pull request. In a checkout with `.github/workflows`, such
 a command passes only for a commit `effort-gate release` marked (listed in the
 repository's `agent-ci-release` file), so CI runs once on a finished change
-rather than on every round of iteration. When git or gh cannot say what the
-command targets, it passes.
+rather than on every round of iteration. A command for another repository
+(`gh -R`), help and dry runs pass, and so does any command whose target git or
+gh cannot name within the lookup budget.
 
 Permission rules match command text by position, so a force flag after the
 remote, or `git -C <dir>` in front, slipped past them; this reads the words of
@@ -31,6 +32,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 OPERATOR_CHARS = '();<>|&`'
@@ -260,39 +262,94 @@ def lists_arguments(words):
     return not formats or not fields <= PS_NAME_FIELDS
 
 
+LOOKUP_BUDGET = 6.0  # seconds for every git and gh lookup of one hook call; Codex allows 10
+lookup_deadline = None
+
+
 def run(cwd, *command):
-    """Stripped stdout of `command`, or '' when it fails or is unavailable."""
+    """Stripped stdout of `command`, or '' when it fails, is unavailable or the
+    lookup budget is spent."""
+    global lookup_deadline
+    lookup_deadline = lookup_deadline or time.monotonic() + LOOKUP_BUDGET
+    remaining = lookup_deadline - time.monotonic()
+    if remaining <= 0.1:
+        return ''
     try:
-        result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=8,
-                                check=False)
+        result = subprocess.run(command, cwd=cwd, capture_output=True, text=True,
+                                timeout=remaining, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return ''
     return result.stdout.strip() if result.returncode == 0 else ''
 
 
-def git_cwd(words, cwd):
-    """The directory a `git` command runs in, its words after the global options."""
-    rest = words[1:]
-    while rest and rest[0].startswith('-'):
-        if rest[0] == '-C' and len(rest) > 1:
-            cwd = str(Path(cwd, rest[1]))
-        rest = rest[2:] if rest[0] in GIT_OPTIONS_WITH_VALUE else rest[1:]
-    return cwd, rest
+def flag(words, *names):
+    """Whether a boolean flag is on: present, or given a value other than false."""
+    for word in words:
+        name, equals, value = word.partition('=')
+        if name in names:
+            return not equals or value.lower() not in ('false', '0', 'no')
+    return False
 
 
-def pushed_refs(rest, cwd):
-    """(source, destination branch) for each branch a `git push` updates."""
-    positional, arguments = [], iter(rest[1:])
+def value(words, *names):
+    """The value of the first of `names` given as `--name value` or `--name=value`."""
+    for index, word in enumerate(words):
+        name, equals, given = word.partition('=')
+        if name in names:
+            return given if equals else (words[index + 1] if index + 1 < len(words) else None)
+    return None
+
+
+def operand(words, options_with_value=()):
+    """The first argument after a gh subcommand, skipping options and their values."""
+    arguments = iter(words)
     for word in arguments:
-        if word in ('--all', '--tags', '--mirror', '--delete', '-d'):
+        if word in options_with_value:
+            next(arguments, None)
+        elif not word.startswith('-'):
+            return word
+    return None
+
+
+def commit_of(cwd, ref):
+    return run(cwd, 'git', 'rev-parse', '--verify', '-q', f'{ref}^{{commit}}') or None
+
+
+def default_branch(cwd):
+    """origin's default branch, or None when the checkout does not record it."""
+    head = run(cwd, 'git', 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD')
+    return head.split('/', 1)[1] if '/' in head else None
+
+
+def on_github(cwd, remote):
+    return 'github.com' in (run(cwd, 'git', 'config', '--get', f'remote.{remote}.url') or remote)
+
+
+def pushed_refs(arguments, cwd):
+    """(source, destination branch) for each branch a `git push` updates on GitHub."""
+    positional, words = [], iter(arguments)
+    for word in words:
+        if word in ('--tags', '--delete', '-d', '--dry-run', '-n', '--help', '-h'):
             return []
         if word in PUSH_OPTIONS_WITH_VALUE:
-            next(arguments, None)
+            next(words, None)
         elif not word.startswith('-'):
             positional.append(word)
     current = run(cwd, 'git', 'symbolic-ref', '--short', '-q', 'HEAD')
+    remote = positional[0] if positional else (
+        run(cwd, 'git', 'config', f'branch.{current}.pushRemote')
+        or run(cwd, 'git', 'config', 'remote.pushDefault')
+        or run(cwd, 'git', 'config', f'branch.{current}.remote') or 'origin')
+    if not on_github(cwd, remote):
+        return []
+    if '--all' in arguments:
+        branches = run(cwd, 'git', 'for-each-ref', '--format=%(refname:short)', 'refs/heads')
+        return [(branch, branch) for branch in branches.splitlines()]
+    if len(positional) < 2:
+        target = run(cwd, 'git', 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{push}')
+        return [('HEAD', target.split('/', 1)[1] if '/' in target else current)]
     refs = []
-    for spec in positional[1:] or ['HEAD']:
+    for spec in positional[1:]:
         source, _, destination = spec.partition(':')
         if not source:
             continue  # `:branch` deletes it
@@ -309,63 +366,55 @@ def ready_pull_request(branch, cwd):
     return state == 'OPEN false'
 
 
-def option(words, *names):
-    return any(word in names or word.split('=', 1)[0] in names for word in words)
-
-
-def operand(words, options_with_value=()):
-    """The first argument after a gh subcommand, skipping options and their values."""
-    arguments = iter(words)
-    for word in arguments:
-        if word in options_with_value:
-            next(arguments, None)
-        elif not word.startswith('-'):
-            return word
-    return None
-
-
-def full_ci_start(words, cwd):
-    """(what starts the run, the commit it tests) when `words` starts a full CI run
-    in a checkout with workflows; None otherwise. The commit is None when it cannot
-    be read."""
+def full_ci_starts(words, cwd):
+    """(what starts the run, the commit it tests, the checkout) for each full CI run
+    `words` would start in a checkout with workflows. The commit is None when git
+    or gh cannot say which one it is."""
     words = strip_prefix(words)
-    if not words:
-        return None
+    if not words or flag(words, '--help', '-h'):
+        return []
     name = words[0].rsplit('/', 1)[-1]
     if name == 'git':
-        cwd, rest = git_cwd(words, cwd)
+        rest = words[1:]
+        while rest and rest[0].startswith('-'):
+            if rest[0] == '-C' and len(rest) > 1:
+                cwd = str(Path(cwd, rest[1]))
+            rest = rest[2:] if rest[0] in GIT_OPTIONS_WITH_VALUE else rest[1:]
         if not rest or rest[0] != 'push' or not workflows(cwd):
-            return None
-        default = run(cwd, 'git', 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD')
-        default = default.split('/', 1)[-1] if default else None
-        for source, destination in pushed_refs(rest, cwd):
-            if destination in (default, 'main', 'master'):
+            return []
+        default = default_branch(cwd)
+        starts = []
+        for source, destination in pushed_refs(rest[1:], cwd):
+            if destination in ((default,) if default else ('main', 'master')):
                 what = f'a push to {destination}'
             elif destination and ready_pull_request(destination, cwd):
                 what = f'a push to ready pull request {destination}'
             else:
                 continue
-            return what, run(cwd, 'git', 'rev-parse', '--verify', '-q', f'{source}^{{commit}}')
-        return None
-    if name != 'gh' or len(words) < 3 or not workflows(cwd):
-        return None
+            starts.append((what, commit_of(cwd, source), cwd))
+        return starts
+    if name != 'gh' or len(words) < 3 or value(words, '-R', '--repo') or not workflows(cwd):
+        return []  # another repository's releases are not recorded here
     group, command, arguments = words[1], words[2], words[3:]
-    head = run(cwd, 'git', 'rev-parse', 'HEAD') or None
-    if (group, command) == ('pr', 'ready') and not option(arguments, '--undo'):
-        target = operand(arguments, {'-R', '--repo'})
+    if (group, command) == ('pr', 'ready') and not flag(arguments, '--undo'):
+        target = operand(arguments)
         oid = run(cwd, 'gh', 'pr', 'view', *([target] if target else []), '--json', 'headRefOid',
                   '--jq', '.headRefOid')
-        return 'marking the pull request ready', oid or head
-    if (group, command) == ('pr', 'create') and not option(arguments, '--draft', '-d'):
-        return 'a pull request opened ready for review', head
+        return [('marking the pull request ready', oid or None, cwd)]
+    if (group, command) == ('pr', 'create') and not flag(arguments, '--draft', '-d'):
+        head = value(arguments, '-H', '--head')
+        return [('a pull request opened ready for review',
+                 commit_of(cwd, head.rsplit(':', 1)[-1] if head else 'HEAD'), cwd)]
     if (group, command) == ('workflow', 'run'):
-        return 'a manual workflow run', head
+        ref = value(arguments, '-r', '--ref') or default_branch(cwd)
+        return [('a manual workflow run', commit_of(cwd, f'origin/{ref}') or commit_of(cwd, ref)
+                 if ref else None, cwd)]
     if (group, command) == ('run', 'rerun'):
-        target = operand(arguments, {'-R', '--repo', '-j', '--job'})
+        target = operand(arguments, {'-j', '--job'})
         sha = run(cwd, 'gh', 'run', 'view', target, '--json', 'headSha', '--jq', '.headSha') \
             if target else ''
-        return 'a re-run', sha or head
-    return None
+        return [('a re-run', sha or None, cwd)]
+    return []
 
 
 def workflows(cwd):
@@ -384,10 +433,16 @@ def released(commit, cwd):
 
 
 def unreleased_ci(commands, cwd):
+    """The first full CI run the commands would start for an unmarked commit. A
+    plain `cd <dir>` moves the commands after it; anything subtler is not followed."""
     for words in commands:
-        start = full_ci_start(words, cwd)
-        if start and start[1] and not released(start[1], cwd):
-            return start
+        plain = strip_prefix(words)
+        if len(plain) == 2 and plain[0] == 'cd':
+            cwd = str(Path(cwd, plain[1]).expanduser())
+            continue
+        for what, commit, checkout in full_ci_starts(words, cwd):
+            if commit and not released(commit, checkout):
+                return what, commit
     return None
 
 

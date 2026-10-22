@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -45,6 +46,7 @@ class FullCiRun(unittest.TestCase):
         git(self.repo, 'remote', 'add', 'origin', str(origin))
         git(self.repo, 'push', '-q', 'origin', 'main')
         git(self.repo, 'remote', 'set-head', 'origin', 'main')
+        git(self.repo, 'remote', 'set-url', 'origin', 'https://github.com/example/repo.git')
         git(self.repo, 'switch', '-qc', 'feature')
         bin_dir.mkdir()
         self.draft = root / 'draft'
@@ -108,6 +110,56 @@ esac
                                            capture_output=True, text=True, check=True,
                                            env=self.env).stdout)
         self.assertIn('effort-gate release', output['hookSpecificOutput']['permissionDecisionReason'])
+
+    def test_every_update_of_a_push_is_checked(self):
+        self.release()
+        git(self.repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q',
+            '--allow-empty', '-m', 'untested')
+        git(self.repo, 'branch', 'released', 'HEAD~1')
+        for command in ('git push origin released:main HEAD:feature', 'git push origin --all',
+                        'gh pr create --draft=false --fill', 'gh pr ready --undo=false'):
+            self.assertEqual(self.decide(command), 'deny', command)
+
+    def test_the_configured_push_destination_decides(self):
+        self.draft.touch()
+        git(self.repo, 'config', 'push.default', 'upstream')
+        git(self.repo, 'config', 'branch.feature.remote', 'origin')
+        git(self.repo, 'config', 'branch.feature.merge', 'refs/heads/main')
+        self.assertEqual(self.decide('git push'), 'deny')
+
+    def test_targets_are_read_from_the_named_ref_and_checkout(self):
+        self.release()
+        git(self.repo, 'branch', 'untested')
+        git(self.repo, 'switch', '-q', 'untested')
+        git(self.repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q',
+            '--allow-empty', '-m', 'untested')
+        git(self.repo, 'switch', '-q', 'feature')
+        self.assertEqual(self.decide('gh pr create --head untested --fill'), 'deny')
+        self.assertEqual(self.decide('git push origin untested:main'), 'deny')
+        with tempfile.TemporaryDirectory() as elsewhere:
+            self.assertEqual(decide(f'git -C {self.repo} push origin feature:main', cwd=elsewhere,
+                                    env=self.env), 'allow')
+            self.assertEqual(decide(f'cd {self.repo} && git push origin untested:main',
+                                    cwd=elsewhere, env=self.env), 'deny')
+
+    def test_help_dry_runs_other_remotes_and_other_repositories_pass(self):
+        for command in ('git push --dry-run origin feature:main', 'git push -n origin HEAD:main',
+                        'gh pr create --help', 'gh workflow run --help',
+                        'git push /tmp/backup.git feature:main', 'gh pr ready 12 -R other/repo'):
+            self.assertEqual(self.decide(command), 'allow', command)
+
+    def test_an_unknown_target_passes(self):
+        gh = Path(self.env['PATH'].split(':', 1)[0]) / 'gh'
+        gh.write_text('#!/bin/sh\nexit 1\n')
+        for command in ('gh pr ready 12', 'gh run rerun 999'):
+            self.assertEqual(self.decide(command), 'allow', command)
+
+    def test_slow_lookups_stay_within_the_hook_time_limit(self):
+        gh = Path(self.env['PATH'].split(':', 1)[0]) / 'gh'
+        gh.write_text('#!/bin/sh\nsleep 20\n')
+        started = time.monotonic()
+        self.assertEqual(self.decide('git push origin feature:a feature:b feature:c'), 'allow')
+        self.assertLess(time.monotonic() - started, 9)
 
     def test_a_checkout_without_workflows_passes(self):
         git(self.repo, 'rm', '-rq', '.github')
