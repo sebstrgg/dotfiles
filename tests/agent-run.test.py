@@ -40,6 +40,21 @@ if os.path.basename(sys.argv[0]) == 'codex':
 else:
     print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'session-1'}))
     print(json.dumps({'type': 'result', 'result': 'verdict: pass'}))
+refusals = os.environ.get('FAKE_REFUSALS')
+if refusals:
+    # The first N calls end the way the CLI does when the provider refuses.
+    with open(refusals) as remaining:
+        count = int(remaining.read() or 0)
+    if count:
+        with open(refusals, 'w') as remaining:
+            remaining.write(str(count - 1))
+        message = os.environ.get('FAKE_REFUSAL', 'Selected model is at capacity. Please try a different model.')
+        if os.path.basename(sys.argv[0]) == 'codex':
+            print(json.dumps({'type': 'error', 'message': message}))
+            print(json.dumps({'type': 'turn.failed', 'error': {'message': message}}))
+        else:
+            print(json.dumps({'type': 'result', 'is_error': True, 'result': message}))
+        sys.exit(1)
 sys.exit(int(os.environ.get('FAKE_EXIT', '0')))
 '''
 
@@ -166,6 +181,59 @@ class AgentRun(unittest.TestCase):
     def test_agent_failure_is_the_wait_exit_code(self):
         waited, _ = self.start_and_wait('claude', 'verify', FAKE_EXIT='3')
         self.assertEqual(waited.returncode, 3)
+
+    def refusing(self, times, **env):
+        counter = Path(self.tmp.name) / 'refusals'
+        counter.write_text(str(times))
+        return {'FAKE_REFUSALS': str(counter), 'AGENT_RUN_RETRY_DELAYS': '0,0,0', **env}
+
+    def test_a_capacity_refusal_resumes_the_same_codex_thread(self):
+        waited, seen = self.start_and_wait('codex', 'work', **self.refusing(2))
+        self.assertEqual(waited.returncode, 0, waited.stdout)
+        self.assertEqual(seen['argv'][:2], ['exec', 'resume'])
+        self.assertEqual(seen['argv'][-2:], ['thread-1', '-'])
+        self.assertIn('model_reasoning_effort=high', seen['argv'])
+        self.assertIn('capacity', seen['stdin'])
+        self.assertEqual((self.run_dir / 'last.md').read_text(), 'verdict: pass\n')
+        events = (self.run_dir / 'events.jsonl').read_text()
+        self.assertEqual(events.count('turn.failed'), 2)
+
+    def test_an_overloaded_claude_session_is_resumed(self):
+        waited, seen = self.start_and_wait('claude', 'work', **self.refusing(1, FAKE_REFUSAL='API Error: 529 overloaded_error'))
+        self.assertEqual(waited.returncode, 0, waited.stdout)
+        self.assertEqual(seen['argv'][-2:], ['--resume', 'session-1'])
+        self.assertIn('verdict: pass', waited.stdout)
+
+    def test_refusals_stop_after_the_last_retry(self):
+        waited, _ = self.start_and_wait('codex', 'work', **self.refusing(4))
+        self.assertEqual(waited.returncode, 1)
+
+    def test_stopping_during_a_retry_delay_ends_the_run(self):
+        self.agent_run('start', 'codex', 'work', str(self.run_dir),
+                       **self.refusing(1, AGENT_RUN_RETRY_DELAYS='60'))
+        for _ in range(100):
+            events = self.run_dir / 'events.jsonl'
+            if events.exists() and 'turn.failed' in events.read_text():
+                break
+            time.sleep(0.1)
+        os.kill(int((self.run_dir / 'pid').read_text()), signal.SIGTERM)
+        started = time.monotonic()
+        waited = self.agent_run('wait', str(self.run_dir), check=False)
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertEqual(waited.returncode, 1)
+
+    def test_a_resumed_attempt_failing_otherwise_is_not_retried_again(self):
+        counter = Path(self.tmp.name) / 'refusals'
+        counter.write_text('1')
+        waited, seen = self.start_and_wait('codex', 'work', FAKE_REFUSALS=str(counter),
+                                           AGENT_RUN_RETRY_DELAYS='0,0,0', FAKE_EXIT='2')
+        self.assertEqual(waited.returncode, 2)
+        self.assertEqual((self.run_dir / 'events.jsonl').read_text().count('thread.started'), 2)
+
+    def test_other_failures_are_not_retried(self):
+        waited, seen = self.start_and_wait('codex', 'work', **self.refusing(1, FAKE_REFUSAL='Invalid request'))
+        self.assertEqual(waited.returncode, 1)
+        self.assertEqual(seen['argv'][:2], ['exec', '--json'])
 
     def test_runs_are_marked_delegated_except_a_continuation(self):
         for role, expected in (('work', 'work'), ('verify', 'verify'), ('review', 'review'),

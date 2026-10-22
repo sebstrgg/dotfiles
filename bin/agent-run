@@ -30,6 +30,9 @@ for the orchestrator, so `effort-gate` neither gates them nor lets them create
 or claim an effort file, and `agent-run` refuses to start or resume a run from
 one.
 
+A provider refusal (model at capacity, overloaded, a 5xx or 429) resumes the
+same session after 30 s, 2 min and 5 min; any other failure ends the run.
+
 The run folder receives command.json (what ran, for the record), events.jsonl,
 stderr.log, last.md and, when the agent exits, `exit` holding its exit code.
 """
@@ -37,6 +40,7 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -48,6 +52,13 @@ ROLES = ('work', 'continue', 'verify', 'review')
 CLAUDE_CREDENTIALS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN')
 MODELS = {'codex': 'gpt-6.1-sol', 'claude': 'opus'}
 REPORT_ONLY = {'verify', 'review'}
+# Provider refusals that a later attempt can pass: the same delays as the
+# reviewer runner. Anything else is the agent's own failure and is not retried.
+RETRY_DELAYS = '30,120,300'
+REFUSAL = re.compile(r'at capacity|overloaded|\b(?:429|500|502|503|504|529)\b', re.IGNORECASE)
+RETRY_PROMPT = ('Your previous turn ended because the model provider refused it (at capacity or '
+                'overloaded). Continue your brief from where you stopped; do not repeat finished '
+                'steps.\n')
 
 
 def default_effort(runtime, role):
@@ -154,25 +165,48 @@ def launch(run_dir, record, session=None):
 
 def supervise(run_dir):
     """Run the agent with the prompt on stdin, then write last.md and the exit marker.
+    A provider refusal (model at capacity, overloaded) resumes the same session
+    after each delay in RETRY_DELAYS; any other failure ends the run at once.
     A signal that stops this supervisor is passed on to the agent's process group,
     so stopping the recorded pid stops the run and still leaves an exit marker."""
     record = json.loads((run_dir / 'command.json').read_text())
     code = 127
+    agent = None
+    stopped = False
+
+    def pass_on(received, _frame):
+        nonlocal stopped
+        stopped = True
+        if agent is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(agent.pid, received)
+
+    for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(signum, pass_on)
+    delays = [float(d) for d in os.environ.get('AGENT_RUN_RETRY_DELAYS', RETRY_DELAYS).split(',')]
     try:
-        with ((run_dir / 'prompt.md').open() as stdin,
-              (run_dir / 'events.jsonl').open('w') as stdout,
-              (run_dir / 'stderr.log').open('w') as stderr):
-            agent = subprocess.Popen(record['argv'], cwd=record['cwd'], stdin=stdin,
-                                     stdout=stdout, stderr=stderr, process_group=0)
-
-            def pass_on(received, _frame):
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(agent.pid, received)
-
-            for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-                signal.signal(signum, pass_on)
-            code = agent.wait()
-            code = 128 - code if code < 0 else code
+        argv, prompt, mode = record['argv'], (run_dir / 'prompt.md').read_text(), 'w'
+        while True:
+            attempt_start = (run_dir / 'events.jsonl').stat().st_size if mode == 'a' else 0
+            with ((run_dir / 'events.jsonl').open(mode) as stdout,
+                  (run_dir / 'stderr.log').open(mode) as stderr):
+                agent = subprocess.Popen(argv, cwd=record['cwd'], stdin=subprocess.PIPE,
+                                         stdout=stdout, stderr=stderr, process_group=0, text=True)
+                agent.communicate(prompt)
+                code = agent.returncode
+                code = 128 - code if code < 0 else code
+            session = session_id(run_dir / 'events.jsonl')
+            if code == 0 or stopped or not delays or session is None \
+                    or not refused(run_dir / 'events.jsonl', attempt_start):
+                break
+            resume_at = time.monotonic() + delays.pop(0)
+            while not stopped and time.monotonic() < resume_at:
+                time.sleep(min(1, max(0, resume_at - time.monotonic())))
+            if stopped:
+                break
+            argv = command(record['runtime'], record['role'], record['model'], record['effort'],
+                           run_dir, session)
+            prompt, mode = RETRY_PROMPT, 'a'
         if record['runtime'] == 'claude':
             result = claude_result(run_dir / 'events.jsonl')
             if result is not None:
@@ -184,9 +218,11 @@ def supervise(run_dir):
     return 0
 
 
-def events(path):
+def events(path, start=0):
     try:
-        lines = path.read_text().splitlines()
+        with path.open('rb') as log:
+            log.seek(start)
+            lines = log.read().decode(errors='replace').splitlines()
     except OSError:
         return
     for line in lines:
@@ -196,6 +232,18 @@ def events(path):
             continue
         if isinstance(event, dict):
             yield event
+
+
+def refused(path, start=0):
+    """Whether the attempt logged from byte `start` ended on a provider refusal."""
+    message = None
+    for event in events(path, start):
+        if event.get('type') in ('error', 'turn.failed'):
+            error = event.get('error')
+            message = error.get('message') if isinstance(error, dict) else event.get('message')
+        elif event.get('type') == 'result':
+            message = event.get('result') if event.get('is_error') else None
+    return isinstance(message, str) and REFUSAL.search(message) is not None
 
 
 def claude_result(path):
