@@ -69,8 +69,9 @@ because it produces the brief.
 ## 3. Build
 
 - Drive behaviour test-first (`tdd`) at seams you choose.
-- Fix the class, not the instance: before a narrow fix, find every sibling of
-  the defect and fix or report the whole set.
+- Fix the root cause (global instructions, "What matters"): before editing,
+  record it under "Root cause" in the effort file, then fix the class, not the
+  instance: find every sibling of the defect and fix or report the whole set.
 - A failure that resists a first look: `diagnosing-bugs`, starting from a red
   loop.
 - Commit in small meaningful steps; update docs the change touches as you go.

@@ -44,6 +44,8 @@ An item fails when:
 - an evaluation compares against model-generated labels or no baseline; it
   needs an independent baseline and blind comparison;
 - a claimed restoration or fix is contradicted by any current signal;
+- a fix has no proven root cause under "Root cause", or removes the symptom
+  while that cause remains (a workaround per the global instructions);
 - UI: per the design reference (one-off components, hard-coded values, generic
   tells, copy that reads translated or ignores the voice).
 

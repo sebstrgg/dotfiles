@@ -35,6 +35,11 @@ access the real check needs.
 |---|---|---|---|---|
 | 1 | | | open | |
 
+## Root cause
+
+For a fix: the cause, the evidence that proves it, and why the change removes
+it rather than its symptom. `n/a` for work that fixes nothing.
+
 ## Decisions
 
 | Decision | Reason |
