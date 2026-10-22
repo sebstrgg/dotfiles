@@ -87,6 +87,13 @@ esac
         for command in commands:
             self.assertEqual(self.decide(command), 'allow', command)
 
+    def test_a_commit_made_in_the_same_command_is_not_released(self):
+        self.release()
+        for command in ('git commit -qam fix && git push origin feature',
+                        'git pull --rebase && gh pr ready', 'git -C . merge x; git push origin HEAD:main'):
+            self.assertEqual(self.decide(command), 'deny', command)
+        self.assertEqual(self.decide('git push origin feature && git commit -qam next'), 'allow')
+
     def test_a_new_commit_needs_its_own_release(self):
         self.release()
         git(self.repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q',

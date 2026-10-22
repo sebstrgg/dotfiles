@@ -460,9 +460,16 @@ def release_marks(cwd):
     return {line.split('\t', 1)[0] for line in lines}
 
 
+MOVES_HEAD = {'commit', 'merge', 'rebase', 'cherry-pick', 'revert', 'am', 'pull', 'reset',
+              'switch', 'checkout'}
+
+
 def unreleased_ci(commands, cwd):
-    """The first full CI run the commands would start for an unmarked commit. A
-    plain `cd <dir>` moves the commands after it; anything subtler is not followed."""
+    """(what, commit) for the first full CI run the commands would start for an
+    unmarked commit. A plain `cd <dir>` moves the commands after it; anything
+    subtler is not followed. After a git command that can move HEAD, the commit
+    is one this hook cannot see yet, so it has no mark: `None`."""
+    moved = False
     for words in commands:
         plain = strip_prefix(words)
         if len(plain) == 2 and plain[0] == 'cd':
@@ -470,9 +477,16 @@ def unreleased_ci(commands, cwd):
             continue
         marks = None
         for what, commit, checkout in full_ci_starts(words, cwd):
+            if moved:
+                return what, None
             marks = release_marks(checkout) if marks is None else marks
             if commit and marks is not None and commit not in marks:
                 return what, commit
+        if plain and plain[0].rsplit('/', 1)[-1] == 'git':
+            rest = plain[1:]
+            while rest and rest[0].startswith('-'):
+                rest = rest[2:] if rest[0] in GIT_OPTIONS_WITH_VALUE else rest[1:]
+            moved = moved or bool(rest and rest[0] in MOVES_HEAD)
     return None
 
 
@@ -505,8 +519,11 @@ def main():
                   'or `pgrep -f <pattern>` for PIDs.')
     elif (start := unreleased_ci(commands, event.get('cwd') or '.')):
         what, commit = start
+        subject = (f'commit {commit[:12]} is not a release' if commit else
+                   'the commit this command makes is not a release yet (commit first, then '
+                   'mark it, then push in its own command)')
         reason = (f'{what[0].upper()}{what[1:]} starts a full run on the CI farm every session '
-                  f'shares, and commit {commit[:12]} is not a release. CI is the release gate, '
+                  f'shares, and {subject}. CI is the release gate, '
                   'not the test loop: iterate on a local build (the fast CI steps, affected '
                   'tests, the walk, review) until no finding is open, batching every finding '
                   'into one change. Keep an iterating pull request in draft (`gh pr ready '
