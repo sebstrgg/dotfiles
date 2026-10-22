@@ -18,8 +18,10 @@ the branch of a ready pull request. In a checkout with `.github/workflows`, such
 a command passes only for a commit `effort-gate release` marked (listed in the
 repository's `agent-ci-release` file), so CI runs once on a finished change
 rather than on every round of iteration. A command for another repository
-(`gh -R`), help and dry runs pass, and so does any command whose target git or
-gh cannot name within the lookup budget.
+(`gh -R`), a push to a remote other than origin, help and dry runs pass, and so
+does any command whose target git or gh cannot name within the lookup budget.
+Commits are read from local refs, a `cd` is followed only at the top level, and
+`remote.<name>.push` mappings are not read.
 
 Permission rules match command text by position, so a force flag after the
 remote, or `git -C <dir>` in front, slipped past them; this reads the words of
@@ -284,10 +286,13 @@ def run(cwd, *command):
 
 def flag(words, *names):
     """Whether a boolean flag is on: present, or given a value other than false."""
+    letters = {name[1] for name in names if len(name) == 2 and name[0] == '-'}
     for word in words:
         name, equals, value = word.partition('=')
         if name in names:
             return not equals or value.lower() not in ('false', '0', 'no')
+        if word[:1] == '-' and word[1:2] != '-' and letters & set(word[1:]):
+            return True  # a group such as `-df`
     return False
 
 
@@ -316,21 +321,28 @@ def commit_of(cwd, ref):
 
 
 def default_branch(cwd):
-    """origin's default branch, or None when the checkout does not record it."""
+    """origin's default branch as the checkout records it, else as GitHub reports
+    it; None when neither can say."""
     head = run(cwd, 'git', 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD')
-    return head.split('/', 1)[1] if '/' in head else None
+    if '/' in head:
+        return head.split('/', 1)[1]
+    return run(cwd, 'gh', 'repo', 'view', '--json', 'defaultBranchRef',
+               '--jq', '.defaultBranchRef.name') or None
 
 
 def on_github(cwd, remote):
-    return 'github.com' in (run(cwd, 'git', 'config', '--get', f'remote.{remote}.url') or remote)
+    url = (run(cwd, 'git', 'config', '--get', f'remote.{remote}.pushurl')
+           or run(cwd, 'git', 'config', '--get', f'remote.{remote}.url') or remote)
+    return 'github.com' in url
 
 
 def pushed_refs(arguments, cwd):
-    """(source, destination branch) for each branch a `git push` updates on GitHub."""
+    """The remote and the (source, destination branch) of each branch a `git push`
+    updates on GitHub."""
     positional, words = [], iter(arguments)
     for word in words:
-        if word in ('--tags', '--delete', '-d', '--dry-run', '-n', '--help', '-h'):
-            return []
+        if word in ('--delete', '-d', '--dry-run', '-n', '--help', '-h'):
+            return None, []
         if word in PUSH_OPTIONS_WITH_VALUE:
             next(words, None)
         elif not word.startswith('-'):
@@ -341,13 +353,13 @@ def pushed_refs(arguments, cwd):
         or run(cwd, 'git', 'config', 'remote.pushDefault')
         or run(cwd, 'git', 'config', f'branch.{current}.remote') or 'origin')
     if not on_github(cwd, remote):
-        return []
-    if '--all' in arguments:
+        return remote, []
+    if '--all' in arguments or '--branches' in arguments:
         branches = run(cwd, 'git', 'for-each-ref', '--format=%(refname:short)', 'refs/heads')
-        return [(branch, branch) for branch in branches.splitlines()]
+        return remote, [(branch, branch) for branch in branches.splitlines()]
     if len(positional) < 2:
         target = run(cwd, 'git', 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{push}')
-        return [('HEAD', target.split('/', 1)[1] if '/' in target else current)]
+        return remote, [('HEAD', target.split('/', 1)[1] if '/' in target else current)]
     refs = []
     for spec in positional[1:]:
         source, _, destination = spec.partition(':')
@@ -357,7 +369,7 @@ def pushed_refs(arguments, cwd):
         if destination == 'HEAD':
             destination = current
         refs.append((source, destination.removeprefix('refs/heads/')))
-    return refs
+    return remote, refs
 
 
 def ready_pull_request(branch, cwd):
@@ -382,10 +394,13 @@ def full_ci_starts(words, cwd):
             rest = rest[2:] if rest[0] in GIT_OPTIONS_WITH_VALUE else rest[1:]
         if not rest or rest[0] != 'push' or not workflows(cwd):
             return []
-        default = default_branch(cwd)
+        remote, refs = pushed_refs(rest[1:], cwd)
+        if remote != 'origin':
+            return []  # gh reads the default branch and pull requests of origin's repository
+        default = default_branch(cwd) if refs else None
         starts = []
-        for source, destination in pushed_refs(rest[1:], cwd):
-            if destination in ((default,) if default else ('main', 'master')):
+        for source, destination in refs:
+            if destination and destination == default:
                 what = f'a push to {destination}'
             elif destination and ready_pull_request(destination, cwd):
                 what = f'a push to ready pull request {destination}'
@@ -393,8 +408,17 @@ def full_ci_starts(words, cwd):
                 continue
             starts.append((what, commit_of(cwd, source), cwd))
         return starts
-    if name != 'gh' or len(words) < 3 or value(words, '-R', '--repo') or not workflows(cwd):
+    if name != 'gh' or flag(words, '--dry-run') or not workflows(cwd):
+        return []
+    repository = value(words, '-R', '--repo')
+    if repository and repository.removesuffix('.git').lower() not in (
+            run(cwd, 'git', 'config', '--get', 'remote.origin.url').lower()):
         return []  # another repository's releases are not recorded here
+    words = [word for index, word in enumerate(words) if word not in ('-R', '--repo')
+             and not word.startswith(('--repo=', '-R='))
+             and (index == 0 or words[index - 1] not in ('-R', '--repo'))]
+    if len(words) < 3:
+        return []
     group, command, arguments = words[1], words[2], words[3:]
     if (group, command) == ('pr', 'ready') and not flag(arguments, '--undo'):
         target = operand(arguments)
@@ -423,13 +447,17 @@ def workflows(cwd):
     return bool(folder and folder.is_dir() and any(folder.glob('*.y*ml')))
 
 
-def released(commit, cwd):
-    marks = run(cwd, 'git', 'rev-parse', '--path-format=absolute', '--git-common-dir')
+def release_marks(cwd):
+    """Commits `effort-gate release` marked in the checkout's repository, or None
+    when git cannot name the repository."""
+    common = run(cwd, 'git', 'rev-parse', '--path-format=absolute', '--git-common-dir')
+    if not common:
+        return None
     try:
-        lines = Path(marks, 'agent-ci-release').read_text().splitlines() if marks else []
+        lines = Path(common, 'agent-ci-release').read_text().splitlines()
     except OSError:
-        return False
-    return any(line.split('\t', 1)[0] == commit for line in lines)
+        return set()
+    return {line.split('\t', 1)[0] for line in lines}
 
 
 def unreleased_ci(commands, cwd):
@@ -440,8 +468,10 @@ def unreleased_ci(commands, cwd):
         if len(plain) == 2 and plain[0] == 'cd':
             cwd = str(Path(cwd, plain[1]).expanduser())
             continue
+        marks = None
         for what, commit, checkout in full_ci_starts(words, cwd):
-            if commit and not released(commit, checkout):
+            marks = release_marks(checkout) if marks is None else marks
+            if commit and marks is not None and commit not in marks:
                 return what, commit
     return None
 

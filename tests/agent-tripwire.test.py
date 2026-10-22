@@ -58,6 +58,7 @@ case "$1 $2" in
     *) if [ -e {self.draft} ]; then echo "OPEN true"; else echo "OPEN false"; fi ;;
   esac ;;
   "run view") git rev-parse HEAD ;;
+  "repo view") echo main ;;
   *) exit 1 ;;
 esac
 ''')
@@ -147,6 +148,22 @@ esac
                         'gh pr create --help', 'gh workflow run --help',
                         'git push /tmp/backup.git feature:main', 'gh pr ready 12 -R other/repo'):
             self.assertEqual(self.decide(command), 'allow', command)
+
+    def test_flag_groups_dry_runs_repositories_and_remotes_are_read(self):
+        self.draft.touch()
+        self.assertEqual(self.decide('gh pr create -df'), 'allow')
+        self.assertEqual(self.decide('gh pr create --dry-run --head feature --title t'), 'allow')
+        for command in ('gh pr ready 12 -R example/repo', 'gh -R example/repo pr ready 12',
+                        'git push origin main --tags', 'git push origin --branches'):
+            self.assertEqual(self.decide(command), 'deny', command)
+        git(self.repo, 'remote', 'add', 'fork', 'https://github.com/someone/repo.git')
+        self.assertEqual(self.decide('git push fork feature:main'), 'allow')
+        git(self.repo, 'config', 'remote.origin.pushurl', '/tmp/backup.git')
+        self.assertEqual(self.decide('git push origin feature:main'), 'allow')
+
+    def test_the_default_branch_comes_from_github_when_unrecorded(self):
+        git(self.repo, 'remote', 'set-head', 'origin', '--delete')
+        self.assertEqual(self.decide('git push origin feature:main'), 'deny')
 
     def test_an_unknown_target_passes(self):
         gh = Path(self.env['PATH'].split(':', 1)[0]) / 'gh'
