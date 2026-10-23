@@ -159,7 +159,7 @@ when every item passes.
   then wait again or stop it.
 - Under T3, a restart kills background commands and running turns without
   waking anyone. While anything runs, keep one `schedule_task` interval of
-  30 minutes bound to the thread, prompting it to re-read the effort file,
+  15 minutes bound to the thread, prompting it to re-read the effort file,
   restart any wait that is gone and delete the schedule once nothing runs.
   Record it as a `Wake heartbeat` row in state `armed`; the stop gate holds
   a T3 session with running tasks until that row exists. Update each row

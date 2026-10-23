@@ -518,7 +518,7 @@ def hold(path, text, items, session_id, runtime):
         return {'decision': 'block', 'reason': (
             f'{path} records a running task: {"; ".join(tasks)}. A T3 restart kills waits '
             'without waking this session, so arm a heartbeat before ending the turn: one '
-            '`schedule_task` interval of 30 minutes bound to this thread, prompting it to re-read '
+            '`schedule_task` interval of 15 minutes bound to this thread, prompting it to re-read '
             'the effort file, restart any wait that is gone, and delete the schedule once '
             'nothing runs. Record it under "Running tasks" as `| Wake heartbeat | T3 schedule | '
             '<scheduled task id> | - | armed |`.')}
