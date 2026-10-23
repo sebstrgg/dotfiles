@@ -82,13 +82,15 @@ class EffortGate(unittest.TestCase):
             (run / 'exit').write_text(f'{exit_code}\n')
 
     def run_gate(self, mode, cwd=None, event='Stop', session=None, runtime=None, last=None,
-                 role=None):
+                 role=None, t3=False):
         """Run a hook as the runtime would; `role` marks a run started by agent-run."""
         payload = {'session_id': session or self.session, 'cwd': str(cwd or self.repo),
                    'hook_event_name': event}
         if last is not None:
             payload['last_assistant_message'] = last
-        env = {k: v for k, v in os.environ.items() if k != 'AGENT_RUN_ROLE'}
+        env = {k: v for k, v in os.environ.items() if k not in ('AGENT_RUN_ROLE', 'T3CODE_CLI_PATH')}
+        if t3:
+            env['T3CODE_CLI_PATH'] = '/usr/local/bin/t3'
         if role:
             env['AGENT_RUN_ROLE'] = role
         command = ['python3', str(GATE), mode, *([runtime] if runtime else [])]
@@ -134,6 +136,20 @@ class EffortGate(unittest.TestCase):
         self.assertEqual(output['decision'], 'block')
         self.assertIn('Export', output['reason'])
         self.assertIn('blocking wait', output['reason'])
+
+    def test_under_t3_a_running_task_needs_an_armed_heartbeat(self):
+        self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
+        output = self.run_gate('stop', runtime='claude', t3=True)
+        self.assertEqual(output['decision'], 'block')
+        self.assertIn('schedule_task', output['reason'])
+        self.write_effort(task='| Export | Bash, background | bg-1 | main | running |\n'
+                               '| Wake heartbeat | T3 schedule | st-1 | - | armed |')
+        self.assertIsNone(self.run_gate('stop', runtime='claude', t3=True))
+
+    def test_an_armed_heartbeat_is_not_a_running_task(self):
+        self.write_effort(first='pass', task='| Wake heartbeat | T3 schedule | st-1 | - | armed |')
+        output = self.run_gate('stop', runtime='claude', t3=True) or {}
+        self.assertNotIn('running task', output.get('reason', ''))
 
     def test_stale_running_task_still_ends_in_blocked(self):
         for runtime in ('claude', None):

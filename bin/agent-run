@@ -8,9 +8,11 @@
       Resume the finished or stopped run's agent session with
       <new-run-dir>/prompt.md as the next message, keeping its runtime, role,
       model, effort and access.
-  agent-run wait <run-dir>
+  agent-run wait <run-dir> [--quiet-minutes N]
       Block until that run exits, print its session handle and last message,
-      and exit with its exit code.
+      and exit with its exit code. A run that writes nothing to its folder for
+      N minutes (default 30) ends the wait with exit 124 while the run goes
+      on, so a stuck agent wakes whoever waits instead of holding them.
 
 The role decides access:
   work      a lane that builds and commits: full access
@@ -49,6 +51,7 @@ import time
 from pathlib import Path
 
 ROLES = ('work', 'continue', 'verify', 'review')
+QUIET_EXIT = 124
 CLAUDE_CREDENTIALS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN')
 MODELS = {'codex': 'gpt-6.1-sol', 'claude': 'opus'}
 REPORT_ONLY = {'verify', 'review'}
@@ -278,6 +281,10 @@ def alive(pid):
     return True
 
 
+def last_write(run_dir):
+    return max(path.stat().st_mtime for path in run_dir.iterdir() if path.is_file())
+
+
 def wait(args):
     run_dir = Path(args.run_dir).expanduser().resolve()
     exit_file = run_dir / 'exit'
@@ -285,9 +292,16 @@ def wait(args):
         pid = int((run_dir / 'pid').read_text())
     except (OSError, ValueError):
         sys.exit(f'agent-run: {run_dir} has no started run')
+    quiet_limit = args.quiet_minutes * 60
     while not exit_file.exists():
         if not alive(pid) and not exit_file.exists():
             sys.exit(f'agent-run: the run in {run_dir} ended without an exit marker; see stderr.log')
+        quiet = time.time() - last_write(run_dir)
+        if quiet >= quiet_limit:
+            print(f'Still running (pid {pid}) but nothing written for {quiet / 60:.0f} minutes. '
+                  f'Read the end of events.jsonl and stderr.log: wait again if it is working, '
+                  f'stop the pid if it is stuck.')
+            return QUIET_EXIT
         time.sleep(2)
     code = int(exit_file.read_text())
     print(f'Exit {code}. {session_handle(run_dir / "events.jsonl")}.')
@@ -317,6 +331,8 @@ def main():
     resumed.add_argument('new_run_dir')
     waited = commands.add_parser('wait', help='wait for a run and print its result')
     waited.add_argument('run_dir')
+    waited.add_argument('--quiet-minutes', type=float, default=30,
+                        help=f'end the wait with exit {QUIET_EXIT} after this long without output')
     args = parser.parse_args()
     return {'start': start, 'resume': resume, 'wait': wait}[args.command](args)
 

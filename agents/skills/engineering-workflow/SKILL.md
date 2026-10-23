@@ -151,9 +151,18 @@ when every item passes.
   a finished verify by the other family under `runs/`, or if "Not approved"
   lists actions the report does not ask.
 - Waiting on a job or agent: record it under "Running tasks" with state
-  `running`. Claude waits through a background command (the job itself, or
-  `agent-run wait <run-dir>`) and ends its turn; it is woken when that command
-  ends. Codex runs one blocking wait in the foreground. Update the row when it
-  ends.
+  `running`, and never end a turn without something that will wake you.
+  Claude starts one background command per job or run (the job itself, or
+  `agent-run wait <run-dir>`), never one combined wait, so each finish wakes
+  it to act on that result. Codex runs one blocking wait in the foreground.
+  Exit 124 from `agent-run wait` means the run went quiet: read its events,
+  then wait again or stop it.
+- Under T3, a restart kills background commands and running turns without
+  waking anyone. While anything runs, keep one `schedule_task` interval of
+  30 minutes bound to the thread, prompting it to re-read the effort file,
+  restart any wait that is gone and delete the schedule once nothing runs.
+  Record it as a `Wake heartbeat` row in state `armed`; the stop gate holds
+  a T3 session with running tasks until that row exists. Update each row
+  when its job ends.
 - Keep the effort file current whenever a decision, approval, item status or
   next step changes. After compaction it is the source of truth.

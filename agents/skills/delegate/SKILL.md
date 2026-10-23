@@ -88,8 +88,9 @@ diagnosis Sol couldn't crack, and cross-family review.
   are one-shot. Subagents stop with the session.
 - `isolation: "worktree"` branches from the default branch, not the session's
   HEAD; a subagent that needs unmerged commits works in the task's worktree.
-- Wait on completion notifications or one Monitor with an until-condition,
-  never a sleep loop.
+- Wait on completion notifications, one per worker, or one Monitor with an
+  until-condition, never a sleep loop. `engineering-workflow` covers keeping
+  a wake armed while workers run.
 - When you keep briefing the same kind of worker, propose a definition in
   `~/.claude/agents/` with model, effort and tools pinned.
 

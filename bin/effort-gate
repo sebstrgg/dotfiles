@@ -31,6 +31,9 @@ passes `claude` and the gate lets that session end its turn. Codex has no such
 wake-up: the gate holds the session and asks for a blocking wait. These stops count
 toward the cap too, so a stale `running` row ends in `blocked` rather than holding
 or freeing the session forever; any change to an item or task row is progress.
+Under T3 (T3CODE_CLI_PATH is set) a restart kills background waits and running
+turns without waking the session, so a running task also needs a `Wake heartbeat`
+row in state `armed`: a T3 schedule that wakes the thread to restart lost waits.
 
 When the owner ends a turn on a finished effort (status `done` or `blocked`, or
 every item passed with nothing running), the gate holds it once more in two
@@ -142,6 +145,12 @@ def open_items(text):
 
 def table_rows(text, section):
     return ['|'.join(row.values()) for row in table(text, section)]
+
+
+def heartbeat_armed(text):
+    return any(row.get('task', '').lower().startswith('wake heartbeat')
+               and re.search(r'\barmed\b', row.get('state', ''), re.IGNORECASE)
+               for row in table(text, 'running tasks'))
 
 
 def running_tasks(text):
@@ -505,6 +514,14 @@ def hold(path, text, items, session_id, runtime):
             f'Effort gate: the agent stopped {MAX_IDENTICAL_BLOCKS} times without progress. '
             f'{path} is now marked blocked; still open: {"; ".join(pending)}.'
             + (f' Not approved, for you to decide: {one_line(reserved)}.' if reserved else ''))}
+    if tasks and os.environ.get('T3CODE_CLI_PATH') and not heartbeat_armed(text):
+        return {'decision': 'block', 'reason': (
+            f'{path} records a running task: {"; ".join(tasks)}. A T3 restart kills waits '
+            'without waking this session, so arm a heartbeat before ending the turn: one '
+            '`schedule_task` interval of 30 minutes bound to this thread, prompting it to re-read '
+            'the effort file, restart any wait that is gone, and delete the schedule once '
+            'nothing runs. Record it under "Running tasks" as `| Wake heartbeat | T3 schedule | '
+            '<scheduled task id> | - | armed |`.')}
     if tasks and runtime in RUNTIMES_THAT_WAKE:
         return None
     if tasks:

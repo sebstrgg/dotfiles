@@ -58,7 +58,8 @@ None.
 
 ## Running tasks
 
-State `running` while it runs; the stop gate reads it.
+State `running` while it runs; the stop gate reads it. Under T3, add a
+`Wake heartbeat` row in state `armed` while anything runs.
 
 | Task | Runtime, model, effort | Handle | Worktree / branch | State |
 |---|---|---|---|---|

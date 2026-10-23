@@ -157,6 +157,15 @@ class AgentRun(unittest.TestCase):
         waited = self.agent_run('wait', str(self.run_dir))
         self.assertIn('verdict: pass', waited.stdout)
 
+    def test_a_quiet_run_ends_the_wait_and_keeps_running(self):
+        self.agent_run('start', 'codex', 'verify', str(self.run_dir), FAKE_SLEEP='8')
+        waited = self.agent_run('wait', str(self.run_dir), '--quiet-minutes', '0.05', check=False)
+        self.assertEqual(waited.returncode, 124, waited.stderr)
+        self.assertIn('nothing written', waited.stdout)
+        self.assertFalse((self.run_dir / 'exit').exists())
+        waited = self.agent_run('wait', str(self.run_dir))
+        self.assertIn('verdict: pass', waited.stdout)
+
     def test_stopping_the_run_stops_the_agent_and_its_children(self):
         pids = self.run_dir.parent / 'agent.pids'
         self.agent_run('start', 'codex', 'verify', str(self.run_dir), FAKE_SLEEP='30',
