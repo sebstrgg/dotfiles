@@ -466,7 +466,8 @@ def stop(event, runtime=None):
                 f'{FAMILY_NAMES[other]} has finished under {path.parent / "runs"} since the '
                 'newest commit in this checkout. Only a fresh verify from that family (the other '
                 'model family unless Sebastian chose one, recorded as `verifier:`), run on the '
-                'final change, makes an item `pass`; any other check adds evidence. Run one now with `agent-run`. If {FAMILY_NAMES[other]} could not run, '
+                'final change, makes an item `pass`; any other check adds evidence. Run one '
+                f'now with `agent-run`. If {FAMILY_NAMES[other]} could not run, '
                 'set those items back to `open` or `blocked`, record why, and correct your '
                 'report. If it did pass them by another route, name that run in Evidence.')}
         reserved = reserved_actions(text)

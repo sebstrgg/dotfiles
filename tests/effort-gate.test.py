@@ -450,7 +450,9 @@ class EffortGate(unittest.TestCase):
     def test_a_named_verifier_is_still_required(self):
         path = self.write_effort(status='done', first='pass', verified_by=('claude',))
         path.write_text(path.read_text().replace('session:', 'verifier: codex\nsession:', 1))
-        self.assertIn('Codex', self.run_gate('stop', last='Done.')['reason'])
+        reason = self.run_gate('stop', last='Done.')['reason']
+        self.assertIn('Codex could not run', reason)
+        self.assertNotIn('{', reason)
 
     def test_an_oversized_effort_file_asks_once_for_a_rewrite(self):
         path = self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
