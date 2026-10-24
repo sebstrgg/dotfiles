@@ -431,8 +431,10 @@ def oversized(path, text, session_id):
     try:
         owner, asked = marker.read_text().split()
         asked = int(asked) if owner == session_id else 0
-    except (OSError, ValueError):
+    except (FileNotFoundError, ValueError):
         asked = 0
+    except OSError:
+        return None
     bucket = size // SIZE_LIMIT
     if bucket <= asked:
         return None

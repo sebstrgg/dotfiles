@@ -453,6 +453,18 @@ class EffortGate(unittest.TestCase):
         self.assertEqual(self.run_gate('stop', runtime='claude')['decision'], 'block')
         self.assertIsNone(self.run_gate('stop', runtime='claude'))
 
+    def test_an_unreadable_size_marker_lets_the_stop_through(self):
+        path = self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
+        path.write_text(path.read_text().replace('Keep going.', 'Keep going. ' * 2000))
+        marker = path.parent / '.size-question'
+        marker.write_text('')
+        marker.chmod(0o200)
+        try:
+            for _ in range(3):
+                self.assertIsNone(self.run_gate('stop', runtime='claude'))
+        finally:
+            marker.chmod(0o600)
+
     def test_open_work_names_the_chosen_verifier(self):
         path = self.write_effort()
         path.write_text(path.read_text().replace('session:', 'verifier: codex\nsession:', 1))
