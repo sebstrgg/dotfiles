@@ -138,9 +138,18 @@ def review_rounds(run_dir, subject):
         except (OSError, ValueError):
             continue
         if (isinstance(record, dict) and record.get('role') == 'review'
-                and record.get('subject', record.get('cwd')) == subject):
+                and same_subject(record.get('subject', record.get('cwd')), subject)):
             rounds.append(record_path.parent.name)
     return rounds
+
+
+def same_subject(recorded, subject):
+    """Subjects match by name, or as the same directory however it was spelled."""
+    if recorded == subject:
+        return True
+    if not isinstance(recorded, str) or not os.path.isabs(recorded) or not os.path.isabs(subject):
+        return False
+    return os.path.realpath(recorded) == os.path.realpath(subject)
 
 
 def capped(run_dir, record, beyond_cap):

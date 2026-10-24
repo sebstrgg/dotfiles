@@ -337,6 +337,17 @@ class AgentRun(unittest.TestCase):
         record = json.loads((run / 'command.json').read_text())
         self.assertEqual(record['beyond_cap'], 'the fix rewrote the parser')
 
+    def test_a_lane_reached_through_a_symlink_is_the_same_subject(self):
+        link = self.checkout.parent / 'checkout-link'
+        link.symlink_to(self.checkout)
+        for name in ('review-1', 'review-2'):
+            run = self.next_run(name)
+            (run / 'command.json').write_text(json.dumps({'role': 'review', 'cwd': str(link)}))
+            (run / 'exit').write_text('0\n')
+        refused, _ = self.review('review-3', check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('2 review rounds', refused.stderr)
+
     def test_reviews_of_other_subjects_do_not_count(self):
         self.review('review-1')
         self.review('review-2')
