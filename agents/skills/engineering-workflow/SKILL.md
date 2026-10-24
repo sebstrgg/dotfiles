@@ -40,6 +40,19 @@ unless a change is requested.
   settled.
 - In Codex, when `create_goal` is available, also set a goal whose objective
   is the outcome.
+- Before work runs unattended (Sebastian asleep or away), check the plan
+  against what that stretch allows, before he leaves:
+  - Mark every "done when" item that needs him (labels, sign-in, a decision),
+    a runtime he ruled out, or more time than the stretch has. Each one is
+    either cut from this stretch or becomes a blocker now, not at his return.
+  - Estimate from this effort's measured pace (items or tickets done per hour
+    so far), not from hope.
+  - Write the stretch as `## Milestones` with local due times. The stop hook
+    raises each overdue one.
+  - Tell him plainly what will and will not be true when he returns. If he
+    restricted runtimes and that rules out the other-family verify, record
+    `verifier: <runtime>` in the front matter: a fresh run of the allowed
+    family verifies.
 
 Intake is complete when the effort file holds the outcome, "done when" items
 checkable on the real target, the approvals given, and a budget. A quality the
@@ -96,8 +109,15 @@ still change the work, so none waits behind a slow check:
    large cross-module change) gets one cross-family review
    (`~/dotfiles/bin/agent-run start <codex|claude> review`). Fix confirmed
    findings and re-check once.
-4. Every finding from these steps goes into the same change; repeat them until
-   none is open. The change is then the release: commit all of it, run
+4. Findings are `blocker`, `major` or `minor`. Blockers and majors from these
+   steps go into the same change; minors become issues. A review that finds
+   only minors passes. A change gets one review and one re-check:
+   `agent-run` refuses a third review of the same subject unless you give it
+   a reason (`--beyond-cap`). Past that, merge once no blocker or major is
+   open, or record a blocker or change approach. A design or mockup is
+   reviewed the same way: it is frozen after its re-check, and later details
+   become acceptance checks in the build. Once nothing blocks, the change is
+   the release: commit all of it, run
    `~/dotfiles/bin/effort-gate release "<why this commit is the release>"`,
    and start CI once (mark the draft ready). The tripwire holds any full CI run
    for a commit without that mark.
@@ -115,7 +135,8 @@ in the effort file.
 
 Dispatch a fresh agent to run `verify` against the "done when" list on the real
 target (after deploy when the outcome lives on a deployed service), from the
-other model family: write its prompt to `.scratch/<effort>/runs/<run>/prompt.md`
+other model family, or from the family named by `verifier:` when Sebastian
+ruled the other one out: write its prompt to `.scratch/<effort>/runs/<run>/prompt.md`
 (the effort file and how to reach the target; every verdict is the
 verifier's) and run `~/dotfiles/bin/agent-run start codex verify <run-dir>`
 from Claude, or `start claude verify` from Codex, then `agent-run wait
@@ -148,8 +169,9 @@ when every item passes.
   stop legitimately, set `status: blocked` with the blocker recorded, or
   `status: done` after `verify` passes (`done` with an unfinished item is
   still held). At close it holds the owner once more if items passed without
-  a finished verify by the other family under `runs/`, or if "Not approved"
-  lists actions the report does not ask.
+  a finished verify by the verifying family under `runs/`, or if "Not
+  approved" lists actions the report does not ask. It also holds once for
+  each milestone past its due time that is not `met`, `missed` or `dropped`.
 - Waiting on a job or agent: record it under "Running tasks" with state
   `running`, and never end a turn without something that will wake you.
   Claude starts one background command per job or run (the job itself, or
@@ -159,10 +181,14 @@ when every item passes.
   then wait again or stop it.
 - Under T3, a restart kills background commands and running turns without
   waking anyone. While anything runs, keep one `schedule_task` interval of
-  15 minutes bound to the thread, prompting it to re-read the effort file,
-  restart any wait that is gone and delete the schedule once nothing runs.
-  Record it as a `Wake heartbeat` row in state `armed`; the stop gate holds
-  a T3 session with running tasks until that row exists. Update each row
-  when its job ends.
+  15 minutes bound to the thread. Its prompt has the session re-read the
+  effort file, restart any wait that is gone, and judge progress against
+  `## Milestones` from commits and merged work, not from whether processes
+  are alive. It deletes the schedule once nothing runs. Record it as a
+  `Wake heartbeat` row in state `armed`; the stop gate holds a T3 session
+  with running tasks until that row exists. Update each row when its job
+  ends. A watch that hits a time limit is restarted, never dropped.
 - Keep the effort file current whenever a decision, approval, item status or
-  next step changes. After compaction it is the source of truth.
+  next step changes. After compaction it is the source of truth. Write it in
+  plain sentences a fresh reader follows; history belongs in git and
+  `runs/`. The stop hook asks for a rewrite once it passes 20 KB.

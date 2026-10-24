@@ -313,6 +313,47 @@ class AgentRun(unittest.TestCase):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn('orchestrator', refused.stderr)
 
+    def review(self, name, *options, check=True):
+        run = self.next_run(name)
+        started = self.agent_run('start', 'codex', 'review', str(run), *options, check=check)
+        if started.returncode == 0:
+            self.agent_run('wait', str(run), check=False)
+        return started, run
+
+    def test_a_third_review_of_the_same_lane_is_refused(self):
+        self.review('review-1')
+        self.review('review-2')
+        refused, run = self.review('review-3', check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('2 review rounds', refused.stderr)
+        self.assertIn('blocker or major', refused.stderr)
+        self.assertFalse((run / 'command.json').exists())
+
+    def test_a_third_review_runs_with_a_recorded_reason(self):
+        self.review('review-1')
+        self.review('review-2')
+        started, run = self.review('review-3', '--beyond-cap', 'the fix rewrote the parser')
+        self.assertEqual(started.returncode, 0, started.stderr)
+        record = json.loads((run / 'command.json').read_text())
+        self.assertEqual(record['beyond_cap'], 'the fix rewrote the parser')
+
+    def test_reviews_of_other_subjects_do_not_count(self):
+        self.review('review-1')
+        self.review('review-2')
+        started, run = self.review('review-3', '--subject', 'release')
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.assertEqual(json.loads((run / 'command.json').read_text())['subject'], 'release')
+        work = self.next_run('work-1')
+        self.assertEqual(self.agent_run('start', 'codex', 'work', str(work)).returncode, 0)
+
+    def test_resuming_a_reviewer_is_a_round(self):
+        _, first = self.review('review-1')
+        self.agent_run('resume', str(first), str(self.next_run('review-2')))
+        self.agent_run('wait', str(self.run_dir.parent / 'review-2'), check=False)
+        refused = self.agent_run('resume', str(first), str(self.next_run('review-3')), check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn('2 review rounds', refused.stderr)
+
     def test_refuses_a_run_folder_without_prompt_or_already_used(self):
         (self.run_dir / 'prompt.md').unlink()
         missing = self.agent_run('start', 'codex', 'verify', str(self.run_dir), check=False)

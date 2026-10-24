@@ -406,6 +406,60 @@ class EffortGate(unittest.TestCase):
                 '- Rotate the key exposed in app.py (commit 1a2b3c4)? I recommend yes.')
         self.assertIsNone(self.run_gate('stop', last=last))
 
+    def add_milestone(self, path, due, status='open', name='Foundation lane merged'):
+        text = path.read_text()
+        if '## Milestones' not in text:
+            text = text.replace('## Blockers', '## Milestones\n\n| Due | Milestone | Check | Status |'
+                                '\n|---|---|---|---|\n\n## Blockers')
+        row = f'| {due} | {name} | merged on the release branch | {status} |\n'
+        path.write_text(text.replace('\n\n## Blockers', '\n' + row + '\n## Blockers'))
+
+    def test_an_overdue_milestone_holds_once_with_a_decision(self):
+        path = self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
+        self.add_milestone(path, '2026-01-01 03:00')
+        output = self.run_gate('stop', runtime='claude')
+        self.assertEqual(output['decision'], 'block')
+        self.assertIn('Foundation lane merged', output['reason'])
+        self.assertIn('cut scope', output['reason'])
+        self.assertIsNone(self.run_gate('stop', runtime='claude'))
+
+    def test_each_overdue_milestone_is_raised(self):
+        path = self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
+        self.add_milestone(path, '2026-01-01 03:00')
+        self.add_milestone(path, '2026-01-01 05:00', name='Page ports running')
+        self.assertIn('Foundation lane merged', self.run_gate('stop', runtime='claude')['reason'])
+        self.assertIn('Page ports running', self.run_gate('stop', runtime='claude')['reason'])
+        self.assertIsNone(self.run_gate('stop', runtime='claude'))
+
+    def test_met_or_future_milestones_do_not_hold(self):
+        path = self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
+        self.add_milestone(path, '2026-01-01 03:00', status='met')
+        self.add_milestone(path, '2999-01-01 03:00', name='Later')
+        self.assertIsNone(self.run_gate('stop', runtime='claude'))
+
+    def test_an_unreadable_due_time_is_raised(self):
+        path = self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
+        self.add_milestone(path, 'around 3')
+        self.assertIn('YYYY-MM-DD HH:MM', self.run_gate('stop', runtime='claude')['reason'])
+
+    def test_a_named_verifier_replaces_the_other_family(self):
+        path = self.write_effort(status='done', first='pass', verified_by=('codex',))
+        path.write_text(path.read_text().replace('session:', 'verifier: codex\nsession:', 1))
+        self.assertIsNone(self.run_gate('stop', last='Done.'))
+
+    def test_a_named_verifier_is_still_required(self):
+        path = self.write_effort(status='done', first='pass', verified_by=('claude',))
+        path.write_text(path.read_text().replace('session:', 'verifier: codex\nsession:', 1))
+        self.assertIn('Codex', self.run_gate('stop', last='Done.')['reason'])
+
+    def test_an_oversized_effort_file_asks_once_for_a_rewrite(self):
+        path = self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
+        path.write_text(path.read_text().replace('Keep going.', 'Keep going. ' * 2000))
+        output = self.run_gate('stop', runtime='claude')
+        self.assertEqual(output['decision'], 'block')
+        self.assertIn('Rewrite', output['reason'])
+        self.assertIsNone(self.run_gate('stop', runtime='claude'))
+
     def test_close_without_a_cross_family_verify_is_questioned_once(self):
         self.write_effort(status='done', first='pass', verified_by=('codex',))
         output = self.run_gate('stop', last='Done; a fresh Codex agent verified it.')

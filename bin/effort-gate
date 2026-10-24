@@ -35,10 +35,18 @@ Under T3 (T3CODE_CLI_PATH is set) a restart kills background waits and running
 turns without waking the session, so a running task also needs a `Wake heartbeat`
 row in state `armed`: a T3 schedule that wakes the thread to restart lost waits.
 
+Two checks hold the owner once each, whatever else is open. A row under
+"## Milestones" (| Due | Milestone | Check | Status |, due as local
+`YYYY-MM-DD HH:MM`) whose due time has passed while its status is not `met`,
+`missed` or `dropped` asks for a decision: cut scope, change approach or report a
+blocker, never more of the same. An effort file over SIZE_LIMIT bytes asks for a
+rewrite into current state, once per further SIZE_LIMIT it grows.
+
 When the owner ends a turn on a finished effort (status `done` or `blocked`, or
 every item passed with nothing running), the gate holds it once more in two
 cases: items are `pass` but no `verify` run by the other runtime has finished
-under the effort's `runs/` folder (`bin/agent-run` records each run there) after
+under the effort's `runs/` folder (`bin/agent-run` records each run there; front
+matter `verifier: <claude|codex>` names the runtime when Sebastian chose it) after
 starting no earlier than the checkout's newest commit, or
 the brief still lists reserved actions under "Not approved" and the last message
 asks fewer questions than it lists actions (one per list item or `;`-separated
@@ -58,6 +66,8 @@ from datetime import datetime
 from pathlib import Path
 
 MAX_IDENTICAL_BLOCKS = 5
+SIZE_LIMIT = 20_000
+MILESTONES_SETTLED = {'met', 'missed', 'dropped'}
 SKILLS = Path(__file__).resolve().parent.parent / 'agents' / 'skills'
 TEMPLATE = (Path(__file__).resolve().parents[1]
             / 'agents' / 'skills' / 'engineering-workflow' / 'templates' / 'effort.md')
@@ -380,30 +390,83 @@ def mark_blocked(path, text, items):
     path.write_text(text)
 
 
+def overdue_milestone(path, text, session_id):
+    """A hold for the first unsettled milestone past its due time that this owner
+    has not yet been asked about, or None."""
+    for row in table(text, 'milestones'):
+        status = row.get('status', '').strip('`* ').lower()
+        if status in MILESTONES_SETTLED:
+            continue
+        due, name = row.get('due', '').strip(), row.get('milestone', '').strip()
+        try:
+            late = datetime.strptime(due, '%Y-%m-%d %H:%M') < datetime.now()
+        except ValueError:
+            late = None
+        subject = f'{due}\n{name}'
+        marker = '.milestone-' + hashlib.sha256(subject.encode()).hexdigest()[:12]
+        if late is False or not first_time(path, marker, session_id, subject):
+            continue
+        if late is None:
+            return {'decision': 'block', 'reason': (
+                f'{path}: milestone "{name}" has due time "{due}", which the gate cannot read. '
+                'Write it as local `YYYY-MM-DD HH:MM` so an overdue milestone is raised.')}
+        return {'decision': 'block', 'reason': (
+            f'{path}: milestone "{name}" was due {due} and is not met. Decide now, from '
+            'evidence of what is actually done: cut scope to the next shippable piece, change '
+            'approach, or record a blocker; never more of the same. Record the decision and its '
+            'reason under "Decisions", set the milestone `met` (with evidence), `missed` or '
+            '`dropped`, move later milestones if the plan changed, and tell Sebastian in plain '
+            'words what will and will not be true when he is back.')}
+    return None
+
+
+def oversized(path, text, session_id):
+    size = len(text.encode())
+    if size <= SIZE_LIMIT or not first_time(path, '.size-question', session_id,
+                                            str(size // SIZE_LIMIT)):
+        return None
+    return {'decision': 'block', 'reason': (
+        f'{path} is {size // 1000} KB; the limit is {SIZE_LIMIT // 1000} KB. Rewrite it as current '
+        'state in plain sentences a fresh reader follows: delete finished history and run '
+        'logs (git and runs/ keep them), keep open items, decisions with reasons, approvals '
+        'and running tasks.')}
+
+
+def verifier(text, runtime):
+    named = front_matter(text).get('verifier', '').lower()
+    return named if named in OTHER_FAMILY else OTHER_FAMILY[runtime or 'codex']
+
+
 def stop(event, runtime=None):
     session_id = str(event.get('session_id', ''))
     efforts = owned_efforts(event.get('cwd') or os.getcwd(), session_id)
     if not efforts:
         return None
     for path, text, status in efforts:
+        if status not in GATED:
+            continue
+        held = overdue_milestone(path, text, session_id) or oversized(path, text, session_id)
+        if held:
+            return held
+    for path, text, status in efforts:
         if status in GATED and (open_items(text) or running_tasks(text)):
             return hold(path, text, open_items(text), session_id, runtime)
     with contextlib.suppress(OSError):
         counter_path(session_id).unlink(missing_ok=True)
     last_message = event.get('last_assistant_message')
-    other = OTHER_FAMILY[runtime or 'codex']
     for path, text, status in efforts:
         if not closing(text, status):
             continue
+        other = verifier(text, runtime)
         since, commit = newest_commit(path.parents[2])
         if (passed(text) and not verified_by(path, other, since)
                 and first_time(path, '.verify-question', session_id, f'{other} {commit}')):
             return {'decision': 'block', 'reason': (
                 f'{path} has items marked `pass`, but no `verify` run by '
                 f'{FAMILY_NAMES[other]} has finished under {path.parent / "runs"} since the '
-                'newest commit in this checkout. Only a fresh verify from the other model family, '
-                'run on the final change, makes an item `pass`; a same-family check adds '
-                f'evidence. Run one now with `agent-run`. If {FAMILY_NAMES[other]} could not run, '
+                'newest commit in this checkout. Only a fresh verify from that family (the other '
+                'model family unless Sebastian chose one, recorded as `verifier:`), run on the '
+                'final change, makes an item `pass`; any other check adds evidence. Run one now with `agent-run`. If {FAMILY_NAMES[other]} could not run, '
                 'set those items back to `open` or `blocked`, record why, and correct your '
                 'report. If it did pass them by another route, name that run in Evidence.')}
         reserved = reserved_actions(text)

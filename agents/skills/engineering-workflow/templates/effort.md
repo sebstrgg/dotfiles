@@ -6,7 +6,8 @@ session: set by effort-gate new or claim
 
 # <Effort title>
 
-Current state only: rewrite sections as things change and delete what is stale.
+Current state only, in plain sentences: rewrite sections as things change and
+delete what is stale. History lives in git and `runs/`.
 
 ## Brief
 
@@ -27,13 +28,24 @@ final report asks each as a yes/no question.
 
 Each item is checked on the real target. Status is `open`, `pass` or
 `blocked`; an item becomes `pass` when a fresh `verify` run from the other model
-family passes it. A test or substitute check never makes an item `pass`: label
+family passes it (or from the family in front matter `verifier:`, set only when
+Sebastian ruled the other one out). A test or substitute check never makes an item `pass`: label
 it a substitute in Evidence and leave the item open, or `blocked` with the
 access the real check needs.
 
 | # | Item | Check on the real target | Status | Evidence |
 |---|---|---|---|---|
 | 1 | | | open | |
+
+## Milestones
+
+For work that runs unattended: what is true by when, judged from commits and
+merged work. Due is local `YYYY-MM-DD HH:MM`; status `open`, `met`, `missed` or
+`dropped`. The stop hook raises each one past due. Delete the section when
+nobody is away.
+
+| Due | Milestone | Check | Status |
+|---|---|---|---|
 
 ## CI runs
 

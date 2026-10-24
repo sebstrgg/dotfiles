@@ -2,9 +2,10 @@
 """Run a Codex or Claude agent detached, with model, effort and access pinned.
 
   agent-run start <codex|claude> <role> <run-dir> [--model M] [--effort E]
+                  [--subject S] [--beyond-cap REASON]
       Run the agent on <run-dir>/prompt.md in the current directory, in its own
       process session, and return at once.
-  agent-run resume <run-dir> <new-run-dir>
+  agent-run resume <run-dir> <new-run-dir> [--beyond-cap REASON]
       Resume the finished or stopped run's agent session with
       <new-run-dir>/prompt.md as the next message, keeping its runtime, role,
       model, effort and access.
@@ -32,6 +33,14 @@ for the orchestrator, so `effort-gate` neither gates them nor lets them create
 or claim an effort file, and `agent-run` refuses to start or resume a run from
 one.
 
+A subject gets at most REVIEW_ROUNDS review runs in one runs folder: the review
+and one re-check after its fixes. The subject is the directory the review runs in
+(a lane's worktree) unless --subject names it, and resuming a reviewer counts as
+a round. A further review is refused unless --beyond-cap gives the reason, which
+command.json records: past the cap the change merges once no blocker or major
+finding is open, with the rest filed, or the orchestrator records a blocker or
+changes approach.
+
 A provider refusal (model at capacity, overloaded, a 5xx or 429) resumes the
 same session after 30 s, 2 min and 5 min; any other failure ends the run.
 
@@ -51,6 +60,7 @@ import time
 from pathlib import Path
 
 ROLES = ('work', 'continue', 'verify', 'review')
+REVIEW_ROUNDS = 2
 QUIET_EXIT = 124
 CLAUDE_CREDENTIALS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN')
 MODELS = {'codex': 'gpt-6.1-sol', 'claude': 'opus'}
@@ -117,13 +127,47 @@ def prompted(run_dir):
     return run_dir
 
 
+def review_rounds(run_dir, subject):
+    """Earlier review runs of `subject` in the runs folder holding `run_dir`."""
+    rounds = []
+    for record_path in sorted(run_dir.parent.glob('*/command.json')):
+        if record_path.parent == run_dir:
+            continue
+        try:
+            record = json.loads(record_path.read_text())
+        except (OSError, ValueError):
+            continue
+        if (isinstance(record, dict) and record.get('role') == 'review'
+                and record.get('subject', record.get('cwd')) == subject):
+            rounds.append(record_path.parent.name)
+    return rounds
+
+
+def capped(run_dir, record, beyond_cap):
+    """The run record, or exit when its review subject has had its rounds and no
+    reason to go beyond them is given."""
+    if record['role'] != 'review':
+        return record
+    rounds = review_rounds(run_dir, record['subject'])
+    if len(rounds) >= REVIEW_ROUNDS and not beyond_cap:
+        sys.exit(f'agent-run: {record["subject"]} has had {len(rounds)} review rounds '
+                 f'({", ".join(rounds)}). Stop reviewing: merge once no blocker or major finding '
+                 'is open and file the rest as issues; otherwise record a blocker or change '
+                 'approach (a second opinion, a re-brief). A further review needs '
+                 '--beyond-cap "<reason>", which the run record keeps.')
+    return {**record, 'beyond_cap': beyond_cap} if beyond_cap else record
+
+
 def start(args):
     refuse_delegated()
     run_dir = prompted(args.run_dir)
     model = args.model or MODELS[args.runtime]
     effort = args.effort or default_effort(args.runtime, args.role)
-    return launch(run_dir, {'runtime': args.runtime, 'role': args.role, 'model': model,
-                            'effort': effort, 'cwd': os.getcwd()})
+    record = {'runtime': args.runtime, 'role': args.role, 'model': model, 'effort': effort,
+              'cwd': os.getcwd()}
+    if args.role == 'review':
+        record['subject'] = args.subject or os.getcwd()
+    return launch(run_dir, capped(run_dir, record, args.beyond_cap))
 
 
 def resume(args):
@@ -139,8 +183,12 @@ def resume(args):
     if session is None:
         sys.exit(f'agent-run: {earlier} recorded no session to resume')
     run_dir = prompted(args.new_run_dir)
-    fields = {key: record[key] for key in ('runtime', 'role', 'model', 'effort', 'cwd')}
-    return launch(run_dir, {**fields, 'resumes': str(earlier)}, session)
+    fields = {key: record[key] for key in ('runtime', 'role', 'model', 'effort', 'cwd', 'subject')
+              if key in record}
+    if fields['role'] == 'review':
+        fields.setdefault('subject', fields['cwd'])
+    fields = capped(run_dir, {**fields, 'resumes': str(earlier)}, args.beyond_cap)
+    return launch(run_dir, fields, session)
 
 
 def launch(run_dir, record, session=None):
@@ -326,9 +374,14 @@ def main():
     started.add_argument('run_dir')
     started.add_argument('--model')
     started.add_argument('--effort')
+    started.add_argument('--subject', help='what a review checks (default: the current directory)')
+    started.add_argument('--beyond-cap', metavar='REASON',
+                         help=f'run a review past {REVIEW_ROUNDS} rounds of its subject, for this reason')
     resumed = commands.add_parser('resume', help="resume an earlier run's agent session")
     resumed.add_argument('run_dir')
     resumed.add_argument('new_run_dir')
+    resumed.add_argument('--beyond-cap', metavar='REASON',
+                         help=f'resume a reviewer past {REVIEW_ROUNDS} rounds, for this reason')
     waited = commands.add_parser('wait', help='wait for a run and print its result')
     waited.add_argument('run_dir')
     waited.add_argument('--quiet-minutes', type=float, default=30,
