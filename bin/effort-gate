@@ -398,11 +398,12 @@ def overdue_milestone(path, text, session_id):
         if status in MILESTONES_SETTLED:
             continue
         due, name = row.get('due', '').strip(), row.get('milestone', '').strip()
+        check = row.get('check', '').strip()
         try:
             late = datetime.strptime(due, '%Y-%m-%d %H:%M') < datetime.now()
         except ValueError:
             late = None
-        subject = f'{due}\n{name}'
+        subject = f'{due}\n{name}\n{check}'
         marker = '.milestone-' + hashlib.sha256(subject.encode()).hexdigest()[:12]
         if late is False or not first_time(path, marker, session_id, subject):
             continue
@@ -421,9 +422,23 @@ def overdue_milestone(path, text, session_id):
 
 
 def oversized(path, text, session_id):
+    """A hold when the file has grown into a further SIZE_LIMIT than this owner was
+    last asked about; shrinking and growing back asks nothing new."""
     size = len(text.encode())
-    if size <= SIZE_LIMIT or not first_time(path, '.size-question', session_id,
-                                            str(size // SIZE_LIMIT)):
+    if size <= SIZE_LIMIT:
+        return None
+    marker = path.parent / '.size-question'
+    try:
+        owner, asked = marker.read_text().split()
+        asked = int(asked) if owner == session_id else 0
+    except (OSError, ValueError):
+        asked = 0
+    bucket = size // SIZE_LIMIT
+    if bucket <= asked:
+        return None
+    try:
+        marker.write_text(f'{session_id} {bucket}\n')
+    except OSError:
         return None
     return {'decision': 'block', 'reason': (
         f'{path} is {size // 1000} KB; the limit is {SIZE_LIMIT // 1000} KB. Rewrite it as current '
@@ -595,8 +610,10 @@ def hold(path, text, items, session_id, runtime):
             'already finished, record that and continue.')}
     return {'decision': 'block', 'reason': (
         f'{path} has "done when" items not yet `pass`: {"; ".join(items)}. '
-        'Continue the work. An item becomes `pass` when a fresh `verify` run from the other '
-        'model family (`~/dotfiles/bin/agent-run`, see `delegate`) passes it on the real target; a '
+        'Continue the work. An item becomes `pass` when a fresh `verify` run by '
+        f'{FAMILY_NAMES[verifier(text, runtime)]} (`~/dotfiles/bin/agent-run start '
+        f'{verifier(text, runtime)} verify`, see `delegate`; the other model family unless '
+        '`verifier:` names one) passes it on the real target; a '
         'substitute check never makes an item `pass`. If you cannot proceed, '
         'record the blocker and set `status: blocked`; once every item passes, set '
         '`status: done`. End with a report of the work to Sebastian.')}

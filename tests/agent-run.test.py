@@ -348,6 +348,18 @@ class AgentRun(unittest.TestCase):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn('2 review rounds', refused.stderr)
 
+    def test_reviews_started_together_still_stop_at_the_cap(self):
+        self.review('review-1')
+        runs = [self.next_run(f'review-{n}') for n in (2, 3, 4)]
+        starts = [subprocess.Popen(['python3', str(AGENT_RUN), 'start', 'codex', 'review', str(run)],
+                                   cwd=self.checkout, env=self.env, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL) for run in runs]
+        codes = [start.wait(timeout=30) for start in starts]
+        self.assertEqual(sorted(codes), [0, 1, 1])
+        for run in runs:
+            if (run / 'command.json').exists():
+                self.agent_run('wait', str(run), check=False)
+
     def test_reviews_of_other_subjects_do_not_count(self):
         self.review('review-1')
         self.review('review-2')

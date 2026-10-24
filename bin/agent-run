@@ -49,6 +49,7 @@ stderr.log, last.md and, when the agent exits, `exit` holding its exit code.
 """
 import argparse
 import contextlib
+import fcntl
 import json
 import os
 import re
@@ -152,6 +153,18 @@ def same_subject(recorded, subject):
     return os.path.realpath(recorded) == os.path.realpath(subject)
 
 
+@contextlib.contextmanager
+def runs_lock(run_dir, role):
+    """Hold the runs folder while a review is counted and recorded, so two reviews
+    started together cannot both pass the cap."""
+    if role != 'review':
+        yield
+        return
+    with (run_dir.parent / '.agent-run.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
 def capped(run_dir, record, beyond_cap):
     """The run record, or exit when its review subject has had its rounds and no
     reason to go beyond them is given."""
@@ -176,7 +189,8 @@ def start(args):
               'cwd': os.getcwd()}
     if args.role == 'review':
         record['subject'] = args.subject or os.getcwd()
-    return launch(run_dir, capped(run_dir, record, args.beyond_cap))
+    with runs_lock(run_dir, record['role']):
+        return launch(run_dir, capped(run_dir, record, args.beyond_cap))
 
 
 def resume(args):
@@ -196,8 +210,9 @@ def resume(args):
               if key in record}
     if fields['role'] == 'review':
         fields.setdefault('subject', fields['cwd'])
-    fields = capped(run_dir, {**fields, 'resumes': str(earlier)}, args.beyond_cap)
-    return launch(run_dir, fields, session)
+    with runs_lock(run_dir, fields['role']):
+        return launch(run_dir, capped(run_dir, {**fields, 'resumes': str(earlier)},
+                                      args.beyond_cap), session)
 
 
 def launch(run_dir, record, session=None):

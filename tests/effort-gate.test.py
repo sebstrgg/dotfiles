@@ -442,6 +442,24 @@ class EffortGate(unittest.TestCase):
         self.add_milestone(path, 'around 3')
         self.assertIn('YYYY-MM-DD HH:MM', self.run_gate('stop', runtime='claude')['reason'])
 
+    def test_milestones_differing_only_in_their_check_are_each_raised(self):
+        path = self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
+        self.add_milestone(path, '2026-01-01 03:00')
+        path.write_text(path.read_text().replace(
+            '| 2026-01-01 03:00 | Foundation lane merged | merged on the release branch | open |',
+            '| 2026-01-01 03:00 | Foundation lane merged | merged on the release branch | open |\n'
+            '| 2026-01-01 03:00 | Foundation lane merged | deployed | open |'))
+        self.assertEqual(self.run_gate('stop', runtime='claude')['decision'], 'block')
+        self.assertEqual(self.run_gate('stop', runtime='claude')['decision'], 'block')
+        self.assertIsNone(self.run_gate('stop', runtime='claude'))
+
+    def test_open_work_names_the_chosen_verifier(self):
+        path = self.write_effort()
+        path.write_text(path.read_text().replace('session:', 'verifier: codex\nsession:', 1))
+        reason = self.run_gate('stop')['reason']
+        self.assertIn('run by Codex', reason)
+        self.assertIn('start codex verify', reason)
+
     def test_a_named_verifier_replaces_the_other_family(self):
         path = self.write_effort(status='done', first='pass', verified_by=('codex',))
         path.write_text(path.read_text().replace('session:', 'verifier: codex\nsession:', 1))
@@ -461,6 +479,13 @@ class EffortGate(unittest.TestCase):
         self.assertEqual(output['decision'], 'block')
         self.assertIn('Rewrite', output['reason'])
         self.assertIsNone(self.run_gate('stop', runtime='claude'))
+        big = path.read_text()
+        path.write_text(big.replace('Keep going. ' * 2000, 'Keep going. ' * 1700))
+        self.assertIsNone(self.run_gate('stop', runtime='claude'))
+        path.write_text(big)
+        self.assertIsNone(self.run_gate('stop', runtime='claude'))
+        path.write_text(big.replace('Keep going. ' * 2000, 'Keep going. ' * 3700))
+        self.assertIn('Rewrite', self.run_gate('stop', runtime='claude')['reason'])
 
     def test_close_without_a_cross_family_verify_is_questioned_once(self):
         self.write_effort(status='done', first='pass', verified_by=('codex',))
