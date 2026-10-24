@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Behaviour of bin/agent-run against stand-in `codex` and `claude` executables."""
+import contextlib
 import json
 import os
 import signal
@@ -218,14 +219,27 @@ class AgentRun(unittest.TestCase):
         self.assertEqual(waited.returncode, 1)
 
     def test_stopping_during_a_retry_delay_ends_the_run(self):
-        self.agent_run('start', 'codex', 'work', str(self.run_dir),
+        pids = Path(self.tmp.name) / 'agent.pid'
+        self.agent_run('start', 'codex', 'work', str(self.run_dir), FAKE_PID=str(pids),
                        **self.refusing(1, AGENT_RUN_RETRY_DELAYS='60'))
+        # The supervisor reaps the refused attempt right before its retry delay, so
+        # once the agent's pid is gone the stop lands in the delay, not the attempt.
         for _ in range(100):
-            events = self.run_dir / 'events.jsonl'
-            if events.exists() and 'turn.failed' in events.read_text():
+            if pids.exists() and pids.read_text().strip():
+                agent, helper = (int(pid) for pid in pids.read_text().split())
                 break
             time.sleep(0.1)
-        os.kill(int((self.run_dir / 'pid').read_text()), signal.SIGTERM)
+        try:
+            for _ in range(200):
+                try:
+                    os.kill(agent, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            os.kill(int((self.run_dir / 'pid').read_text()), signal.SIGTERM)
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(helper, signal.SIGTERM)
         started = time.monotonic()
         waited = self.agent_run('wait', str(self.run_dir), check=False)
         self.assertLess(time.monotonic() - started, 10)
@@ -359,6 +373,13 @@ class AgentRun(unittest.TestCase):
         for run in runs:
             if (run / 'command.json').exists():
                 self.agent_run('wait', str(run), check=False)
+
+    def test_a_blank_reason_does_not_pass_the_cap(self):
+        self.review('review-1')
+        self.review('review-2')
+        refused, run = self.review('review-3', '--beyond-cap', '   ', check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertFalse((run / 'command.json').exists())
 
     def test_reviews_of_other_subjects_do_not_count(self):
         self.review('review-1')

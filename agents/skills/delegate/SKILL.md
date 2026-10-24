@@ -66,13 +66,13 @@ diagnosis Sol couldn't crack, and cross-family review.
 
 - `verify` runs in a fresh agent from the other model family: a Claude
   orchestrator sends it to Codex, a Codex orchestrator to Claude, both through
-  `agent-run`. A same-family verify counts only when the target is out of the
-  other family's reach, or when Sebastian ruled the other family out for the
-  effort: record that as `verifier: <runtime>` in the effort file's front
-  matter, and the verify is a fresh run of that family. When the other family
-  just cannot run (signed out, usage limit), the items stay open until it can,
-  or go `blocked`. A subagent that
-  forks the orchestrator's context is not fresh.
+  `agent-run`. A same-family verify counts only when Sebastian ruled the other
+  family out for the effort or the target is out of its reach: record that as
+  `verifier: <runtime>` in the effort file's front matter, with the reason
+  under Decisions, and the verify is a fresh run of that family. When the
+  other family just cannot run for now (signed out, usage limit), the items
+  stay open until it can, or go `blocked`. A subagent that forks the
+  orchestrator's context is not fresh.
 - Cross-family code review for expensive-to-miss code: Codex reviews
   Claude-written code, Claude reviews Codex-written code. Fix confirmed findings
   and re-check once.

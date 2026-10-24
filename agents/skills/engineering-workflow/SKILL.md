@@ -135,8 +135,8 @@ in the effort file.
 
 Dispatch a fresh agent to run `verify` against the "done when" list on the real
 target (after deploy when the outcome lives on a deployed service), from the
-other model family, or from the family named by `verifier:` when Sebastian
-ruled the other one out: write its prompt to `.scratch/<effort>/runs/<run>/prompt.md`
+other model family, or from the family named by `verifier:` (`delegate`
+says when that applies): write its prompt to `.scratch/<effort>/runs/<run>/prompt.md`
 (the effort file and how to reach the target; every verdict is the
 verifier's) and run `~/dotfiles/bin/agent-run start codex verify <run-dir>`
 from Claude, or `start claude verify` from Codex (the runtime `verifier:`

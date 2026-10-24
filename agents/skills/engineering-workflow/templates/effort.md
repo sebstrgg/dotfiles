@@ -28,8 +28,8 @@ final report asks each as a yes/no question.
 
 Each item is checked on the real target. Status is `open`, `pass` or
 `blocked`; an item becomes `pass` when a fresh `verify` run from the other model
-family passes it (or from the family in front matter `verifier:`, set only when
-Sebastian ruled the other one out). A test or substitute check never makes an item `pass`: label
+family passes it, or from the family in front matter `verifier:` (set only as
+`delegate` allows). A test or substitute check never makes an item `pass`: label
 it a substitute in Evidence and leave the item open, or `blocked` with the
 access the real check needs.
 

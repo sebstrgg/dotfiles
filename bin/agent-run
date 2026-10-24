@@ -180,6 +180,13 @@ def capped(run_dir, record, beyond_cap):
     return {**record, 'beyond_cap': beyond_cap} if beyond_cap else record
 
 
+def reason(text):
+    """A --beyond-cap reason: words, not blank space."""
+    if not text.strip():
+        raise argparse.ArgumentTypeError('give the reason in words')
+    return text.strip()
+
+
 def start(args):
     refuse_delegated()
     run_dir = prompted(args.run_dir)
@@ -399,12 +406,12 @@ def main():
     started.add_argument('--model')
     started.add_argument('--effort')
     started.add_argument('--subject', help='what a review checks (default: the current directory)')
-    started.add_argument('--beyond-cap', metavar='REASON',
+    started.add_argument('--beyond-cap', metavar='REASON', type=reason,
                          help=f'run a review past {REVIEW_ROUNDS} rounds of its subject, for this reason')
     resumed = commands.add_parser('resume', help="resume an earlier run's agent session")
     resumed.add_argument('run_dir')
     resumed.add_argument('new_run_dir')
-    resumed.add_argument('--beyond-cap', metavar='REASON',
+    resumed.add_argument('--beyond-cap', metavar='REASON', type=reason,
                          help=f'resume a reviewer past {REVIEW_ROUNDS} rounds, for this reason')
     waited = commands.add_parser('wait', help='wait for a run and print its result')
     waited.add_argument('run_dir')
