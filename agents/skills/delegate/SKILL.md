@@ -32,9 +32,8 @@ work is the judgment, or when the brief would cost more than doing it.
 
 Claude tokens are the scarcest. A Claude orchestrator gives Sol everything a
 precise brief can carry and keeps the judgment. A Codex orchestrator runs its
-own Sol workers and brings in Opus for design, rendered-UI and copy review, a
-diagnosis Sol couldn't crack, and code review where Opus is the better reader
-(the review loop below).
+own Sol workers and brings in Opus for design, rendered-UI and copy review and
+a diagnosis Sol couldn't crack.
 
 ## Starting a child
 
@@ -112,13 +111,9 @@ A fresh reviewer checks code where a missed bug is expensive before its pull
 request goes ready. You own the code: fix what is right, push back on what is
 wrong. Review makes the change correct, not bigger.
 
-- **Reviewer:** pick it by what changed, not by who wrote it. One reviewer
-  at a time, always a fresh child.
-  - Product behaviour, UI, copy, cross-module logic and public contracts:
-    `claude-opus-5-5`.
-  - CI, infrastructure, scripts, data handling, migrations and refactors:
-    `gpt-6.1-sol`.
-  - Change fits both: the family that didn't write it.
+- **Reviewer:** `gpt-6.1-sol` in a fresh child, whoever wrote the code.
+  Design, rendered UI and copy go to `claude-opus-5-5` instead. One reviewer
+  at a time.
 - **Effort:** match the stakes, not the habit.
   - `medium`: a small change in one module that is easy to roll back.
   - `high`: ordinary logic changes.
