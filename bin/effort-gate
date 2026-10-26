@@ -38,9 +38,9 @@ An effort file over SIZE_LIMIT bytes asks for a rewrite into current state,
 once per further SIZE_LIMIT it grows. Verification evidence belongs in the
 "Done when" table; the hook does not inspect child-task records.
 
-The first stop after the owner sets an effort `done` reads the last message: a
-report that never says what Sebastian may overrule is held once, so the calls
-the agent made for him reach him.
+The first stop after the owner sets an effort `done` or `blocked` reads the last
+message: a report that never says what Sebastian may overrule is held once, so
+the calls the agent made for him reach him.
 """
 import contextlib
 import hashlib
@@ -378,7 +378,7 @@ def oversized(path, text, session_id):
         'and running tasks.')}
 
 
-def unreported_calls(path, session_id, last):
+def unreported_calls(path, status, session_id, last):
     """A hold, once per effort, when its closing report names no calls to overrule."""
     if not last:
         return None
@@ -392,7 +392,7 @@ def unreported_calls(path, session_id, last):
     if re.search(r'overrul', last, re.IGNORECASE):
         return None
     return {'decision': 'block', 'reason': (
-        f'{path} is done, and your report does not say what Sebastian may overrule. '
+        f'{path} is {status}, and your report does not say what Sebastian may overrule. '
         'Write the report again: what needs him first, then the calls he may overrule (each '
         'decision you made for him, with its reason, or that you made none), then the '
         'outcome and evidence.')}
@@ -413,8 +413,8 @@ def stop(event, runtime=None):
         if status in GATED and (open_items(text) or running_tasks(text)):
             return hold(path, text, open_items(text), session_id, runtime)
     for path, text, status in efforts:
-        if status == 'done':
-            held = unreported_calls(path, session_id, event.get('last_assistant_message'))
+        if status in ('done', 'blocked'):
+            held = unreported_calls(path, status, session_id, event.get('last_assistant_message'))
             if held:
                 return held
     with contextlib.suppress(OSError):

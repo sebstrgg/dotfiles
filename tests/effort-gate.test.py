@@ -378,6 +378,11 @@ class EffortGate(unittest.TestCase):
         self.assertIsNone(self.run_gate('stop'))
         self.assertEqual(self.run_gate('stop', last='Done.')['decision'], 'block')
 
+    def test_a_blocked_effort_report_without_calls_is_held_once(self):
+        self.write_effort(status='blocked', first='blocked')
+        self.assertIn('overrule', self.run_gate('stop', last='Phone check unverified.')['reason'])
+        self.assertIsNone(self.run_gate('stop', last='Phone check unverified.'))
+
     def test_a_closing_report_naming_its_calls_passes(self):
         self.write_effort(status='done', first='pass', evidence='Fresh verifier: t3-thread://v1/x')
         self.assertIsNone(self.run_gate('stop', runtime='claude',
