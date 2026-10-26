@@ -33,8 +33,9 @@ instructions) is made, checked once on the real target and reported.
   brief and ends on its report. It creates no effort file and starts no
   reviewer, verifier or worker of its own.
 - Otherwise: `~/dotfiles/bin/effort-gate new <effort>` creates
-  `.scratch/<effort>/effort.md` from [the template](templates/effort.md).
-  Fill in the brief before any product edit or background job:
+  `.scratch/<effort>/effort.md` from [the template](templates/effort.md)
+  and records it for this session's hooks: the agent setup's own state,
+  which a limit he sets on his files does not cover. Fill in the brief before any product edit or background job:
   - **Outcome**, quoting his words, and **done when** items checkable on
     the real target. A named quality (fast, secure) is a measured item; a
     change to persisted state has an item that the new build starts on a
