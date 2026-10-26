@@ -166,7 +166,17 @@ Installer-managed blocks (bun, shell completions, etc.) live in
 append to your rc from corrupting the committed file.
 The first install seeds it from `zsh/.zshrc.local.example`; edit it freely.
 
+Dotfiles owns the Claude statusline and the macOS usage-window keeper. The
+installer and doctor merge only `statusLine` in Claude settings; the keeper
+uses Claude subscription usage when a window expires. `dots-doctor --fix`
+repairs these files and reloads the keeper on the real macOS home.
+
 Agent workflows live in the private [wl7r/agent-setup](https://github.com/wl7r/agent-setup) repository.
+
+Offline Claude checks: `python3 tests/claude-config.test.py`,
+`shellcheck install.sh scripts/doctor.sh claude/statusline.sh bin/claude-window-keeper`,
+`shfmt -i 4 -ci -d install.sh scripts/doctor.sh claude/statusline.sh`, and
+`shfmt -d bin/claude-window-keeper`.
 
 ## Updating dotfiles
 
