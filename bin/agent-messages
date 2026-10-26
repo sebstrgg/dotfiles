@@ -465,8 +465,23 @@ def digest(db, window):
 
     active_threads = set()
     ended_runs = {'completed', 'failed', 'cancelled', 'interrupted'}
-    for rid, tid, status, completed in db.execute(
-            'SELECT run_id, thread_id, status, completed_at FROM orchestration_v2_projection_runs '
+    def resent_in(tid, requested):
+        """A later thread that opens with this thread's first message: Sebastian
+        resent the request (often to another project), so nothing was lost."""
+        first = db.execute("SELECT json_extract(payload_json, '$.text') FROM orchestration_v2_projection_turn_items "
+                           "WHERE thread_id = ? AND type = 'user_message' ORDER BY ordinal LIMIT 1", (tid,)).fetchone()
+        if not first or not first[0]:
+            return None
+        found = db.execute(
+            "SELECT i.thread_id FROM orchestration_v2_projection_turn_items i "
+            "JOIN orchestration_v2_projection_runs r ON r.thread_id = i.thread_id "
+            "WHERE i.type = 'user_message' AND i.thread_id != ? AND json_extract(i.payload_json, '$.text') = ? "
+            "AND julianday(r.requested_at) >= julianday(?) ORDER BY r.requested_at LIMIT 1",
+            (tid, first[0], requested)).fetchone()
+        return found[0] if found else None
+
+    for rid, tid, status, requested, completed in db.execute(
+            'SELECT run_id, thread_id, status, requested_at, completed_at FROM orchestration_v2_projection_runs '
             'ORDER BY requested_at, run_id'):
         if tid not in threads:
             continue
@@ -475,8 +490,10 @@ def digest(db, window):
         if status == 'failed':
             finished = parsed_time(completed, {'thread_id': tid, 'run_id': rid})
             if finished is not None and since <= finished < until:
+                resent = resent_in(tid, requested)
                 result['late'].append({'type': 'failed_run', **thread_fields(tid), 'run_id': rid,
-                                       'completed_at': digest_time(completed)})
+                                       'completed_at': digest_time(completed),
+                                       'resent_in_thread_id': resent})
     result['running']['threads_with_active_run'] = len(active_threads)
 
     for request_id, tid, node_id, kind, created, raw in db.execute(
@@ -489,12 +506,18 @@ def digest(db, window):
         request = payload(raw, source)
         questions = []
 
+        recommended = []
+
         def question_texts(item):
             if isinstance(item.get('question'), str):
                 questions.append(item['question'])
             for question in item.get('questions', []) or []:
                 if isinstance(question, dict) and isinstance(question.get('question'), str):
                     questions.append(question['question'])
+                    # The agent's recommendation, when it marked an option.
+                    recommended.extend(option['label'] for option in question.get('options') or []
+                                       if isinstance(option, dict) and isinstance(option.get('label'), str)
+                                       and 'recommend' in option['label'].lower())
 
         question_texts(request)
         for (item_raw,) in db.execute(
@@ -507,7 +530,8 @@ def digest(db, window):
             'type': 'runtime_request', **thread_fields(tid), 'request_id': request_id, 'kind': kind,
             'created_at': digest_time(created) if created_time else None,
             'age_seconds': max(0, int((now - created_time).total_seconds())) if created_time else None,
-            'questions': list(dict.fromkeys(questions))})
+            'questions': list(dict.fromkeys(questions)),
+            'recommended_options': list(dict.fromkeys(recommended))})
 
     for tid, url, raw in db.execute(
             'SELECT thread_id, url, snapshot_json FROM projection_thread_pull_requests ORDER BY url, thread_id'):
@@ -597,7 +621,8 @@ def digest(db, window):
         # T3's structural IDs contain long percent-encoded words that resemble
         # opaque credentials; preserve those links, while still filtering known
         # credential forms. Free text (including handles) gets both checks.
-        identity = key in {'thread_id', 'project_id', 'request_id', 'run_id', 'task_id', 'session'}
+        identity = key in {'thread_id', 'project_id', 'request_id', 'run_id', 'task_id', 'session',
+                            'resent_in_thread_id'}
         return digest_text(value, opaque=not identity) if isinstance(value, str) else value
 
     return redacted(result)

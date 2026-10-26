@@ -251,13 +251,15 @@ checkout: {checkout or root}
                             (request, request, kind, status, json.dumps({'answers': {'x': 'never emit answers'}})))
         self.db.execute('INSERT INTO orchestration_v2_projection_turn_items VALUES '
                         "('q', 't1', 'user_input_request', 1, ?)",
-                        (json.dumps({'questions': [{'question': 'Which format?', 'options': [{'label': 'hidden'}]}],
+                        (json.dumps({'questions': [{'question': 'Which format?', 'options': [
+                                         {'label': 'hidden'}, {'label': 'Markdown (Recommended)'}]}],
                                      'questionAnswer': {'text': 'do not emit'}, 'input': 'never emit a command'}),))
         out = self.run_digest()
         rows = out['waiting_on_sebastian']
         self.assertEqual(len(rows), 2)
         question = next(r for r in rows if r['request_id'] == 'q')
         self.assertEqual(question['questions'], ['Which format?'])
+        self.assertEqual(question['recommended_options'], ['Markdown (Recommended)'])
         self.assertEqual(question['age_seconds'], 7200)
         self.assertEqual(question['project_title'], 'Project')
         approval = next(r for r in rows if r['request_id'] == 'a')
@@ -286,6 +288,21 @@ checkout: {checkout or root}
         self.assertTrue(effort['blockers_section_present'])
         self.assertEqual(next(r['url'] for r in out['waiting_on_sebastian'] if r['type'] == 'pull_request'), url)
         self.assertNotIn('Private body', json.dumps(out))
+
+    def test_failed_run_names_the_thread_it_was_resent_in(self):
+        self.thread('resent')
+        for tid, rid, status in [('t1', 'dead', 'failed'), ('resent', 'live', 'completed')]:
+            self.db.execute("INSERT INTO orchestration_v2_projection_turn_items VALUES "
+                            "(?, ?, 'user_message', 1, ?)", (tid, tid, json.dumps({'text': 'Build accounts'})))
+            self.run_row(rid, tid, status=status, completed='2026-10-25T10:00:00Z')
+        self.thread('lost')
+        self.db.execute("INSERT INTO orchestration_v2_projection_turn_items VALUES "
+                        "('lost', 'lost', 'user_message', 1, ?)", (json.dumps({'text': 'Only once'}),))
+        self.run_row('lost-run', 'lost', status='failed', completed='2026-10-25T10:00:00Z')
+        out = self.run_digest()
+        failed = {r['thread_id']: r['resent_in_thread_id'] for r in out['late'] if r['type'] == 'failed_run'}
+        self.assertEqual(failed, {'t1': 'resent', 'lost': None})
+        self.assertNotIn('Build accounts', json.dumps(out))
 
     def test_active_effort_with_a_blocker_waits_on_sebastian(self):
         waiting = self.effort('waiting', done_status='blocked',

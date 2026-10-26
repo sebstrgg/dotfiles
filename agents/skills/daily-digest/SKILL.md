@@ -22,10 +22,12 @@ Read-only apart from step 5: nudge no thread, fix nothing.
 3. Write the digest in this thread, one or two sentences per item, each
    with its link (`[title](t3-thread://v1/<threadId>)`, the pull request URL
    or the effort path), in this order:
-   - **Waits on you:** pending questions with the agent's recommendation when
-     it gave one, blocked efforts with the blocker, pull requests handed over.
+   - **Waits on you:** pending questions with the agent's recommendation
+     (`recommended_options`, or its "I recommend" in the question), efforts
+     waiting on him with the blocker, pull requests handed over.
    - **Late:** overdue milestones, stalled efforts, tasks recorded as running
-     that have ended, failed runs, each with what step 2 found.
+     that have ended, failed runs not resent (`resent_in_thread_id` empty),
+     each with what step 2 found.
    - **Landed:** efforts done, pull requests merged.
    - **Running:** one line of counts.
    Leave out an empty section. Nothing at all: one line, "Nothing needs you;
