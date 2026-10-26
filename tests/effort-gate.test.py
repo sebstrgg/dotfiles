@@ -364,6 +364,23 @@ class EffortGate(unittest.TestCase):
                           not_approved='Going public.')
         self.assertIsNone(self.run_gate('stop', runtime='claude', last='Waiting for the export.'))
 
+    def test_a_closing_report_without_calls_to_overrule_is_held_once(self):
+        self.write_effort(status='done', first='pass', evidence='Fresh verifier: t3-thread://v1/x')
+        output = self.run_gate('stop', last='Done. Nothing needed from you.')
+        self.assertEqual(output['decision'], 'block')
+        self.assertIn('overrule', output['reason'])
+        self.assertIsNone(self.run_gate('stop', last='Done. Nothing needed from you.'))
+
+    def test_a_closing_report_naming_its_calls_passes(self):
+        self.write_effort(status='done', first='pass', evidence='Fresh verifier: t3-thread://v1/x')
+        self.assertIsNone(self.run_gate('stop', runtime='claude',
+                                        last='Calls you may overrule: plain HTTP, no login.'))
+        self.assertIsNone(self.run_gate('stop', runtime='claude', last='Answering a follow-up.'))
+
+    def test_an_active_effort_is_not_asked_for_its_calls(self):
+        self.write_effort(first='pass')
+        self.assertIsNone(self.run_gate('stop', last='Halfway there.'))
+
     def test_other_sessions_are_never_asked_to_close(self):
         self.write_effort(status='done', first='pass', not_approved='Going public.')
         self.assertIsNone(self.run_gate('stop', session=str(uuid.uuid4()), last='Done.'))
