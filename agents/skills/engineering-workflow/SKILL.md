@@ -5,8 +5,19 @@ description: Sebastian's path from request to verified result. Use at the start 
 
 # Engineering workflow
 
-Intake, build, prove, review, deliver, verify, close. The global instructions
-own authority and the meaning of done; this skill owns the order. Questions,
+The global instructions own authority and the meaning of done; this skill
+owns the order and hands each stage to the skill that carries it:
+
+1. Intake: the effort file; `unattended` when Sebastian is leaving.
+2. Plan: the effort file, or `to-spec`, `to-tickets`, `implement-spec`.
+3. Build: lanes per `delegate`.
+4. Prove and review: `prove-it`, then `delegate`'s review loop.
+5. Deliver: `ship`, which hands the open pull request to `babysit-pr`.
+6. Verify: `verify` in a fresh child per `delegate`.
+7. Close.
+
+Each of those skills also loads on its own when its situation comes up
+mid-task (an existing pull request, a request for proof). Questions,
 reviews and diagnosis stop after intake with an answer unless a change is
 requested; evidence about UI, runtime or device behaviour comes from
 `prove-it`, for a diagnosis too. Match the ceremony to the task: a quick change (global
