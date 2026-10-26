@@ -373,6 +373,11 @@ class EffortGate(unittest.TestCase):
         self.assertIn('overrule', output['reason'])
         self.assertIsNone(self.run_gate('stop', last='Done. Nothing needed from you.'))
 
+    def test_a_stop_without_a_message_leaves_the_report_check_for_later(self):
+        self.write_effort(status='done', first='pass', evidence='Fresh verifier: t3-thread://v1/x')
+        self.assertIsNone(self.run_gate('stop'))
+        self.assertEqual(self.run_gate('stop', last='Done.')['decision'], 'block')
+
     def test_a_closing_report_naming_its_calls_passes(self):
         self.write_effort(status='done', first='pass', evidence='Fresh verifier: t3-thread://v1/x')
         self.assertIsNone(self.run_gate('stop', runtime='claude',

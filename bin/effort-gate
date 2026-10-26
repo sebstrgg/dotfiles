@@ -380,6 +380,8 @@ def oversized(path, text, session_id):
 
 def unreported_calls(path, session_id, last):
     """A hold, once per effort, when its closing report names no calls to overrule."""
+    if not last:
+        return None
     marker = path.parent / '.close-report'
     try:
         if marker.exists() and marker.read_text().strip() == session_id:
@@ -387,7 +389,7 @@ def unreported_calls(path, session_id, last):
         marker.write_text(f'{session_id}\n')
     except OSError:
         return None
-    if not last or re.search(r'overrul', last, re.IGNORECASE):
+    if re.search(r'overrul', last, re.IGNORECASE):
         return None
     return {'decision': 'block', 'reason': (
         f'{path} is done, and your report does not say what Sebastian may overrule. '

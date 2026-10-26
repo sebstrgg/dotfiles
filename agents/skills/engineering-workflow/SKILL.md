@@ -44,8 +44,10 @@ instructions) is made, checked once on the real target and reported.
 - Unsettled intent: one round of numbered questions now, while Sebastian is
   here, each with your recommendation, and only the ones where his answer
   changes the outcome. Add to that round what you can foresee needing from
-  him later, so he can leave: a new UI's direction (a line per
-  alternative), a spend, a sign-in. State the rest as decisions. A new
+  him later, so he can leave: the direction of any UI without an approved
+  one, however small, as a line per alternative (read the
+  [design reference](references/design.md) first), a spend, a sign-in.
+  State the rest as decisions. A new
   project or big feature with unsettled intent: `grilling`.
 - Work that will run while Sebastian is away: `unattended` before he leaves.
 
