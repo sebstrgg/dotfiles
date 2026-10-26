@@ -1,6 +1,6 @@
 ---
 name: unattended
-description: Plan and run work that continues while Sebastian is away or asleep, so there is real progress when he returns. Use when he says he is leaving, going to bed, "overnight", "while I'm out" or "keep going without me", or a run will clearly outlast his attention.
+description: Plan and run work that continues while Sebastian is away or asleep, so there is real progress when he returns. Use when he says he is leaving or heading to bed, "overnight", "while I'm out", "I'm off" or "keep going without me", or a run will clearly outlast his attention - even when the task itself is ordinary engineering.
 ---
 
 # Unattended work
