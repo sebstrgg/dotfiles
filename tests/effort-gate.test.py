@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shlex
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -54,6 +55,17 @@ class EffortGate(unittest.TestCase):
         self.repo.mkdir()
         subprocess.run(['git', 'init', '-q', str(self.repo)], check=True)
         self.session = str(uuid.uuid4())
+        self.t3_state = Path(self.tmp.name).resolve() / 'statev2.sqlite'
+        with sqlite3.connect(self.t3_state) as db:
+            db.execute('CREATE TABLE orchestration_v2_projection_subagents '
+                       '(subagent_id TEXT PRIMARY KEY, status TEXT NOT NULL, started_at TEXT)')
+
+    def record_t3_task(self, client_request_id, status, started_at='2026-10-26T12:00:00Z'):
+        subagent = ('node:delegated-task:command%3Amcp%3Aparent-thread%3Adelegate-task%3A'
+                    + client_request_id)
+        with sqlite3.connect(self.t3_state) as db:
+            db.execute('INSERT OR REPLACE INTO orchestration_v2_projection_subagents VALUES (?, ?, ?)',
+                       (subagent, status, started_at))
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -75,6 +87,7 @@ class EffortGate(unittest.TestCase):
         if last is not None:
             payload['last_assistant_message'] = last
         env = {k: v for k, v in os.environ.items() if k not in ('AGENT_RUN_ROLE', 'T3CODE_CLI_PATH')}
+        env['T3_STATE_DB'] = str(self.t3_state)
         if t3:
             env['T3CODE_CLI_PATH'] = '/usr/local/bin/t3'
         if role:
@@ -133,6 +146,40 @@ class EffortGate(unittest.TestCase):
         for _ in range(8):
             self.assertIsNone(self.run_gate('stop', t3=True))
         self.assertNotIn('status: blocked', path.read_text())
+
+    def test_a_t3_task_that_has_ended_holds_the_stop_until_its_row_is_updated(self):
+        path = self.write_effort(task='| Review | T3 child, Codex sol | task `review-r1` | main | running |')
+        self.record_t3_task('review-r1', 'running')
+        self.assertIsNone(self.run_gate('stop', t3=True))
+        self.record_t3_task('review-r1', 'completed')
+        reason = self.run_gate('stop', t3=True)['reason']
+        self.assertIn('has ended: Review', reason)
+        self.assertIn('task_status', reason)
+        path.write_text(path.read_text().replace('| main | running |', '| main | done |'))
+        self.assertIn('#1 Login works', self.run_gate('stop', t3=True)['reason'])
+
+    def test_an_ended_t3_task_is_not_excused_by_a_live_one(self):
+        self.write_effort(task='| Review | T3 child | task `review-r1` | main | running |\n'
+                               '| Verify | T3 child | task `verify-1` | main | running |')
+        self.record_t3_task('review-r1', 'running')
+        self.record_t3_task('verify-1', 'failed')
+        reason = self.run_gate('stop', t3=True)['reason']
+        self.assertIn('has ended: Verify', reason)
+        self.assertNotIn('Review', reason)
+
+    def test_the_latest_t3_task_with_a_reused_id_decides(self):
+        self.write_effort(task='| Review | T3 child | task `review-r1` | main | running |')
+        self.record_t3_task('review-r1', 'completed', started_at='2026-10-20T09:00:00Z')
+        subagent = 'node:delegated-task:command%3Amcp%3Aother-thread%3Adelegate-task%3Areview-r1'
+        with sqlite3.connect(self.t3_state) as db:
+            db.execute('INSERT INTO orchestration_v2_projection_subagents VALUES (?, ?, ?)',
+                       (subagent, 'running', '2026-10-26T12:00:00Z'))
+        self.assertIsNone(self.run_gate('stop', t3=True))
+
+    def test_an_unreadable_t3_state_keeps_waiting_on_t3(self):
+        self.write_effort(task='| Review | T3 child | task `review-r1` | main | running |')
+        self.t3_state.write_text('not a database')
+        self.assertIsNone(self.run_gate('stop', t3=True))
 
     def test_t3_owned_task_does_not_excuse_a_shell_job_beside_it(self):
         self.write_effort(task='| Review | T3 child | task `review-r1` | main | running |\n'

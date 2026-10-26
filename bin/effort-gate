@@ -40,11 +40,13 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 MAX_IDENTICAL_BLOCKS = 5
 SIZE_LIMIT = 20_000
@@ -56,6 +58,11 @@ RUNTIMES_THAT_WAKE = {'claude'}
 # A row whose runtime names T3 (a child task, watched pull request or schedule)
 # wakes its thread in either runtime.
 T3_OWNED = re.compile(r'\bT3\b')
+# T3's own record of delegated tasks, read-only. A row's handle names a task by
+# the `clientRequestId` it was started with.
+T3_STATE = Path(os.environ.get('T3_STATE_DB', Path.home() / '.t3' / 'userdata' / 'statev2.sqlite'))
+T3_TASK = re.compile(r'\btask\s+`([^`]+)`')
+T3_ENDED = {'completed', 'cancelled', 'failed', 'interrupted'}
 
 
 def read_event():
@@ -149,6 +156,25 @@ def row_runtime(row):
 
 def running_tasks(text):
     return [row.get('task', '?') for row in running_rows(text)]
+
+
+def t3_task_ended(row):
+    """Whether T3 records the delegated task in this row's handle as ended. A
+    handle T3 does not know (a watched pull request, a schedule) or an unreadable
+    state file counts as still running: T3 wakes the thread for those."""
+    match = T3_TASK.search(row.get('handle', ''))
+    if not match:
+        return False
+    suffix = 'delegate-task' + quote(':' + match.group(1), safe="!*'()")
+    try:
+        with contextlib.closing(sqlite3.connect(f'{T3_STATE.as_uri()}?mode=ro', uri=True, timeout=2)) as db:
+            found = db.execute(
+                'SELECT status FROM orchestration_v2_projection_subagents '
+                'WHERE substr(subagent_id, -length(?)) = ? ORDER BY started_at DESC LIMIT 1',
+                (suffix, suffix)).fetchone()
+    except sqlite3.Error:
+        return False
+    return bool(found) and found[0] in T3_ENDED
 
 
 def worktree_roots(cwd):
@@ -345,10 +371,13 @@ def hold(path, text, items, session_id, runtime):
     cap marks the effort blocked."""
     tasks = running_tasks(text)
     running = running_rows(text)
-    if tasks and all(T3_OWNED.search(row_runtime(row)) for row in running):
+    ended = [row.get('task', '?') for row in running
+             if T3_OWNED.search(row_runtime(row)) and t3_task_ended(row)]
+    if tasks and not ended and all(T3_OWNED.search(row_runtime(row)) for row in running):
         # T3 keeps these tasks' state and wakes the session when each ends, so
         # stopping to wait is no stall. A background shell job can die without
-        # a word (a T3 restart), so it still counts toward the cap below.
+        # a word (a T3 restart), so it still counts toward the cap below. A task
+        # T3 already ended wakes nobody again: its row must be brought up to date.
         return None
     unwoken = [row.get('task', '?') for row in running
                if runtime not in RUNTIMES_THAT_WAKE and not T3_OWNED.search(row_runtime(row))]
@@ -366,6 +395,11 @@ def hold(path, text, items, session_id, runtime):
         return {'systemMessage': (
             f'Effort gate: the agent stopped {MAX_IDENTICAL_BLOCKS} times without progress. '
             f'{path} is now marked blocked; still open: {"; ".join(pending)}.')}
+    if ended:
+        return {'decision': 'block', 'reason': (
+            f'{path} records as running a T3 task that has ended: {"; ".join(ended)}. '
+            'Read its result (`task_status`), act on it, update its row in "Running tasks", '
+            'then continue.')}
     if tasks and not unwoken:
         return None
     if tasks:
