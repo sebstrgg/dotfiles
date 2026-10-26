@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reclaim reproducible development data above 58% Data-volume use, down to 55%.
+# Reclaim reproducible development data above 70% APFS-container use, down to 67%.
 set -euo pipefail
 
 dry_run=false
@@ -26,7 +26,7 @@ if ! shlock -p "$$" -f "$lock"; then
 	printf '{"action":"lock","status":"already_running"}\n'
 	exit 0
 fi
-trap 'rm -f "$lock" "$lock.log" "$lock.lsof" "$lock.stderr"' EXIT
+trap 'rm -f "$lock" "$lock.log" "$lock.lsof" "$lock.stderr" "$lock.apfs"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -46,24 +46,26 @@ log() {
 }
 
 measure() {
-	local data
-	if ! data=$(df -k "$HOME" | awk 'NR == 2 {print $3, $4}'); then
+	local device
+	device=$(df -k "$HOME" | awk 'NR == 2 {print $1}')
+	if ! diskutil info -plist "$device" >"$lock.apfs" 2>/dev/null; then
 		log measure error
 		exit 1
 	fi
-	read -r used available <<<"$data"
-	if [[ ! $used =~ ^[0-9]+$ || ! $available =~ ^[0-9]+$ ]] || ((used + available == 0)); then
+	total=$(plutil -extract APFSContainerSize raw -o - "$lock.apfs")
+	available=$(plutil -extract APFSContainerFree raw -o - "$lock.apfs")
+	if [[ ! $total =~ ^[0-9]+$ || ! $available =~ ^[0-9]+$ ]] || ((total == 0 || available > total)); then
 		log measure invalid
 		exit 1
 	fi
-	total=$((used + available))
+	used=$((total - available))
 	use_percent=$(awk -v used="$used" -v total="$total" 'BEGIN {printf "%.2f", 100 * used / total}')
 }
 
 measure
 before=$use_percent
-if ((100 * used <= 58 * total)) && ! $force; then
-	log threshold "below_or_equal_58_percent" "$use_percent%"
+if ((100 * used <= 70 * total)) && ! $force; then
+	log threshold "below_or_equal_70_percent" "$use_percent%"
 	exit 0
 fi
 
@@ -74,8 +76,8 @@ finish() {
 
 checkpoint() {
 	measure
-	if ((100 * used <= 55 * total)); then
-		finish reached_55_percent
+	if ((100 * used <= 67 * total)); then
+		finish reached_67_percent
 		exit 0
 	fi
 }
@@ -227,6 +229,57 @@ unused() {
 		END {exit found ? 1 : 0}' "$lock.lsof"
 }
 
+cache_cold() {
+	local recent
+	recent=$(find -P "$1" \( -mmin -360 -o -cmin -360 \) -print -quit 2>"$lock.stderr") || return 1
+	[[ -z $recent && ! -s $lock.stderr ]]
+}
+
+thread_idle() {
+	local worktree=$1 state="$HOME/.t3/userdata/statev2.sqlite" escaped busy
+	[[ -f $state ]] || return 0
+	command -v sqlite3 >/dev/null 2>&1 || return 1
+	escaped=${worktree//\'/\'\'}
+	busy=$(sqlite3 -readonly "$state" "
+		SELECT count(*) FROM orchestration_v2_projection_threads t
+		LEFT JOIN orchestration_v2_projection_provider_threads p USING(thread_id)
+		WHERE t.deleted_at IS NULL AND json_extract(t.payload_json, '$.worktreePath') = '$escaped'
+		AND (coalesce(p.status, 'idle') NOT IN ('idle', 'not_loaded') OR
+		CAST(strftime('%s', t.updated_at) AS INTEGER) >= CAST(strftime('%s', 'now', '-6 hours') AS INTEGER));
+		" 2>"$lock.stderr") || return 1
+	[[ $busy == 0 && ! -s $lock.stderr ]]
+}
+
+# Only rebuildable ignored caches in registered secondary worktrees are eligible.
+# Keep source, branches, scratch evidence and every active or recently used tree.
+for repository in "$HOME"/code/*; do
+	[[ -d $repository/.git ]] || continue
+	safe_dir "$repository" || continue
+	while IFS= read -r -d '' record; do
+		[[ $record == 'worktree '* ]] || continue
+		worktree=${record#worktree }
+		[[ $worktree == "$HOME/code/"* && $worktree != "$repository" ]] || continue
+		safe_dir "$worktree" || continue
+		for relative in api/.venv web/node_modules web/.next; do
+			dir="$worktree/$relative"
+			safe_dir "$dir" || continue
+			if building || ! cache_cold "$dir" || ! thread_idle "$worktree" || ! unused "$worktree"; then
+				log worktree_cache active_recent_or_inspection_failed "$dir"
+				continue
+			fi
+			git -C "$worktree" check-ignore -q -- "$relative" || continue
+			tracked=$(git -C "$worktree" ls-files -- "$relative") || continue
+			[[ -z $tracked ]] || continue
+			# Repeat activity/age checks after the Git inspection, immediately before removal.
+			if cache_cold "$dir" && thread_idle "$worktree" && unused "$worktree" && ! building; then
+				remove_dir worktree_cache "$dir"
+			else
+				log worktree_cache activity_changed "$dir"
+			fi
+		done
+	done < <(git -C "$repository" worktree list --porcelain -z)
+done
+
 for dir in /private/tmp/* /private/tmp/.[!.]* /private/tmp/..?*; do
 	safe_dir "$dir" || continue
 	# Never remove a relocated HOME, including this job's log and lock.
@@ -266,3 +319,7 @@ if safe_dir "$browser_cache"; then
 fi
 
 finish exhausted
+# Do not report a healthy scheduled run when safe cleanup cannot meet the ceiling.
+if ! $dry_run && ((100 * used > 70 * total)); then
+	exit 1
+fi

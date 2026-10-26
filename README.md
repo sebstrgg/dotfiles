@@ -47,9 +47,9 @@ Full setup + migration runbook: [docs/bitwarden-rbw-setup.md](docs/bitwarden-rbw
 
 ### Development disk trimming (macOS)
 
-`bin/dev-disk-trim` measures Data-volume use as used / (used + available).
-Above 58%, it trims reproducible development output and caches in order, stopping
-at 55%. `--dry-run` reports actions; `--force` bypasses the starting threshold.
+`bin/dev-disk-trim` measures physical APFS-container use, including system volumes.
+Above 70%, it trims reproducible development output and caches in order, stopping
+at 67%. `--dry-run` reports actions; `--force` bypasses the starting threshold.
 Busy builds keep their output; failed process/file inspections keep the data.
 The hourly launch agent also runs at load. JSON actions and before/after usage
 are logged to `~/Library/Logs/dev-disk-trim.log`, capped below 1 MiB.
@@ -59,8 +59,13 @@ pruning is skipped if that tool or a responsive daemon is unavailable.
 The Kimsufi `tools/dev-clean.sh`, its worktree variants, and identical copies are
 skipped because it also deletes protected scratch data and worktrees; its Rust
 target is handled directly. Agent databases,
-Docker volumes, CoreSimulator, and project sources are excluded. This can exhaust
-the safe candidates before reaching 55%; it does not guarantee a usage ceiling.
+Docker volumes, CoreSimulator, and project sources are excluded. Registered secondary
+worktrees may lose ignored `api/.venv`, `web/node_modules` and `web/.next` only after
+six hours without writes or recent T3 activity, with fresh build and open-handle
+checks. Rebuildable caches are deleted directly without backups; branches,
+worktrees and other ignored data remain. Failed inspection preserves the cache.
+This can exhaust safe candidates before reaching 67%; it does not guarantee a
+ceiling during active writes. A real run still above 70% exits nonzero.
 
 Install or update explicitly:
 
