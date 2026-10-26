@@ -8,6 +8,7 @@ import json
 import math
 from pathlib import Path
 import re
+import shlex
 import sqlite3
 import sys
 from zoneinfo import ZoneInfo
@@ -30,6 +31,10 @@ COMMAND_PATTERNS = {
     'claude -p': r'(?<![\w-])claude\s+(?:[^\n;&|]*?\s)?(?:-p\b|--print\b)',
     'codex exec': r'(?<![\w-])codex\s+exec\b',
 }
+SHELLS = {'sh', 'bash', 'zsh'}
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?^\s*\2\b", re.DOTALL | re.MULTILINE)
+QUOTED = re.compile(r"'[^']*'|\"(?:\\.|[^\"\\])*\"")
+SKILL_READ = re.compile(r'skills/([\w-]+)/SKILL\.md\b')
 
 
 def iso_time(value):
@@ -71,6 +76,23 @@ def arguments():
     return args.command, (since.isoformat(), until.isoformat())
 
 
+def unwrapped(command):
+    """The script a `zsh -lc '...'` wrapper (Codex's form) runs, else the command."""
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return command
+    if len(argv) >= 3 and Path(argv[0]).name in SHELLS and argv[-2] in ('-c', '-lc', '-lic'):
+        return argv[-1]
+    return command
+
+
+def executable(script):
+    """`script` without heredoc bodies and quoted strings, so text a command only
+    prints or writes is not counted as a command it runs."""
+    return QUOTED.sub("''", HEREDOC.sub('', script))
+
+
 def messages(db, window):
     query = f"""
         SELECT m.created_at, m.thread_id, t.title, p.title,
@@ -93,7 +115,7 @@ def messages(db, window):
     for ts, thread_id, title, project, text, tail in db.execute(query, window):
         yield {
             'ts': iso_time(ts).astimezone(STOCKHOLM).isoformat(timespec='minutes'),
-            'thread_id': thread_id[:8],
+            'thread_id': thread_id,
             'thread_title': title,
             'project_title': project,
             'text': text,
@@ -102,30 +124,41 @@ def messages(db, window):
 
 
 def usage(db, window):
-    message_count, thread_count, wakes, heartbeats = db.execute(f"""
+    # A scheduler dispatch carries its schedule's id; a delegated child's brief
+    # lands in a `thread:delegated-task:` thread. Other agent-sent prompts are
+    # coordination between threads.
+    message_count, thread_count, wakes, heartbeats, briefs, coordination = db.execute(f"""
         SELECT count(*) FILTER (WHERE {HUMAN}),
                count(DISTINCT thread_id) FILTER (WHERE {HUMAN}),
-               count(*) FILTER (WHERE role = 'user'
-                   AND json_extract(payload_json, '$.creationSource') = 'mcp'),
-               count(*) FILTER (WHERE role = 'user'
-                   AND json_extract(payload_json, '$.creationSource') = 'mcp'
-                   AND instr(lower(json_extract(payload_json, '$.text')), 'eartbeat') > 0)
-          FROM orchestration_v2_projection_messages WHERE {MESSAGE_WINDOW}
+               count(*) FILTER (WHERE scheduled IS NOT NULL),
+               count(*) FILTER (WHERE scheduled IS NOT NULL AND (instr(lower(scheduled), 'heartbeat') > 0
+                   OR instr(lower(json_extract(payload_json, '$.text')), 'heartbeat') > 0)),
+               count(*) FILTER (WHERE agent AND scheduled IS NULL
+                   AND thread_id LIKE 'thread:delegated-task:%'),
+               count(*) FILTER (WHERE agent AND scheduled IS NULL
+                   AND thread_id NOT LIKE 'thread:delegated-task:%')
+          FROM (SELECT *, json_extract(payload_json, '$.scheduledTaskId') AS scheduled,
+                       role = 'user' AND json_extract(payload_json, '$.createdBy') = 'agent'
+                           AND json_extract(payload_json, '$.creationSource') = 'mcp' AS agent
+                  FROM orchestration_v2_projection_messages WHERE {MESSAGE_WINDOW})
     """, window).fetchone()
-    tools, skills = Counter(), Counter()
+    tools = Counter()
+    skills = {'claude': Counter(), 'codex': Counter()}
     questions = 0
     shell = dict.fromkeys(COMMAND_PATTERNS, 0)
     rows = db.execute(f"""
-        SELECT type, json_extract(payload_json, '$.toolName'),
-               json_extract(payload_json, '$.input.skill'),
-               CASE WHEN json_type(payload_json, '$.input') = 'text'
-                    THEN json_extract(payload_json, '$.input')
-                    ELSE json_extract(payload_json, '$.input.command') END
-          FROM orchestration_v2_projection_turn_items
-         WHERE type IN ('dynamic_tool', 'command_execution', 'user_input_request')
-           AND {ITEM_WINDOW}
+        SELECT i.type, json_extract(i.payload_json, '$.toolName'),
+               json_extract(i.payload_json, '$.input.skill'),
+               CASE WHEN json_type(i.payload_json, '$.input') = 'text'
+                    THEN json_extract(i.payload_json, '$.input')
+                    ELSE json_extract(i.payload_json, '$.input.command') END,
+               t.default_provider
+          FROM orchestration_v2_projection_turn_items AS i
+          LEFT JOIN orchestration_v2_projection_threads AS t ON t.thread_id = i.thread_id
+         WHERE i.type IN ('dynamic_tool', 'command_execution', 'user_input_request')
+           AND julianday(i.updated_at) >= julianday(?) AND julianday(i.updated_at) < julianday(?)
     """, window)
-    for kind, name, skill, command in rows:
+    for kind, name, skill, command, provider in rows:
         if kind == 'dynamic_tool':
             if isinstance(name, str):
                 for prefix in TOOL_PREFIXES:
@@ -133,19 +166,27 @@ def usage(db, window):
                         tools[name.removeprefix(prefix)] += 1
                         break
             if name == 'Skill' and isinstance(skill, str) and skill:
-                skills[skill] += 1
+                skills['claude'][skill] += 1
         elif kind == 'user_input_request':
             questions += 1
         elif isinstance(command, str):
+            script = unwrapped(command)
+            if provider == 'codex':
+                # Codex loads a skill by reading its file.
+                for name in set(SKILL_READ.findall(script)):
+                    skills['codex'][name] += 1
+            script = executable(script)
             for category, pattern in COMMAND_PATTERNS.items():
-                shell[category] += bool(re.search(pattern, command))
+                shell[category] += bool(re.search(pattern, script))
     return {
         'sebastian_messages': message_count,
         'threads_with_messages': thread_count,
-        'scheduled_prompt_wakes': wakes,
+        'scheduled_wakes': wakes,
         'heartbeat_wakes': heartbeats,
+        'delegated_briefs': briefs,
+        'agent_coordination_messages': coordination,
         't3_tool_calls': dict(sorted(tools.items())),
-        'skill_invocations': dict(sorted(skills.items())),
+        'skill_loads': {runtime: dict(sorted(counts.items())) for runtime, counts in skills.items()},
         'user_input_requests': questions,
         'shell_commands': shell,
     }

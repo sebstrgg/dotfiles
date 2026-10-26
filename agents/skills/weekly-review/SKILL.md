@@ -13,8 +13,10 @@ the report and doc-only clean-up. Budget: about 30 minutes.
 ## 1. Measure
 
 - `~/dotfiles/bin/agent-messages usage --days 7` gives counts: his messages,
-  T3 tool use, skill loads, question-tool use, delegation path, hand-rolled
-  CI waits and scheduled wakes.
+  T3 tool use, skill loads per runtime (Claude `Skill` calls, Codex reads of
+  `SKILL.md`), question-tool use, delegation path, hand-rolled CI waits,
+  scheduled wakes and delegated briefs. Compare with the baseline's
+  `agent-messages` line.
 - `~/dotfiles/bin/agent-messages messages --days 7` gives his messages with
   the agent's preceding reply. Classify each, from his words plus that reply:
   - `new-task`: a new request or a follow-up not caused by an agent mistake.

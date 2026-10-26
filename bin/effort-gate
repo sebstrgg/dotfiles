@@ -53,6 +53,8 @@ TEMPLATE = (Path(__file__).resolve().parents[1]
             / 'agents' / 'skills' / 'engineering-workflow' / 'templates' / 'effort.md')
 SESSION_VARIABLES = {'codex': 'CODEX_THREAD_ID', 'claude': 'CLAUDE_CODE_SESSION_ID'}
 RUNTIMES_THAT_WAKE = {'claude'}
+# A T3 child task, watched pull request or schedule wakes its thread in either runtime.
+T3_OWNED = re.compile(r'\bT3\b|delegate_task|watch_pull_request|schedule_task')
 
 
 def read_event():
@@ -135,9 +137,13 @@ def table_rows(text, section):
     return ['|'.join(row.values()) for row in table(text, section)]
 
 
-def running_tasks(text):
-    return [row.get('task', '?') for row in table(text, 'running tasks')
+def running_rows(text):
+    return [row for row in table(text, 'running tasks')
             if re.search(r'\brunning\b', row.get('state', ''), re.IGNORECASE)]
+
+
+def running_tasks(text):
+    return [row.get('task', '?') for row in running_rows(text)]
 
 
 def worktree_roots(cwd):
@@ -347,11 +353,14 @@ def hold(path, text, items, session_id, runtime):
         return {'systemMessage': (
             f'Effort gate: the agent stopped {MAX_IDENTICAL_BLOCKS} times without progress. '
             f'{path} is now marked blocked; still open: {"; ".join(pending)}.')}
-    if tasks and runtime in RUNTIMES_THAT_WAKE:
+    unwoken = [row.get('task', '?') for row in running_rows(text)
+               if runtime not in RUNTIMES_THAT_WAKE and not T3_OWNED.search(' '.join(row.values()))]
+    if tasks and not unwoken:
         return None
     if tasks:
         return {'decision': 'block', 'reason': (
-            f'{path} records a running task: {"; ".join(tasks)}. Wait for it with one blocking '
+            f'{path} records a running task nothing will wake you for: {"; ".join(unwoken)}. '
+            'Wait for it with one blocking '
             'wait on its completion (its process or exit marker), then continue. If it has '
             'already finished, record that and continue.')}
     return {'decision': 'block', 'reason': (

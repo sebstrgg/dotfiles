@@ -31,7 +31,7 @@ each through the question tool as a yes/no question.
 
 Each item is checked on the real target. Status is `open`, `pass` or
 `blocked`; an item becomes `pass` when a fresh verifier (a T3 child task from
-the other model family, see `delegate`) passes it on the real target and its
+the family `delegate` names) passes it on the real target and its
 thread is cited in Evidence. A test or substitute check never makes an item
 `pass`: label it a substitute in Evidence and leave the item open, or `blocked`
 with the access the real check needs.
@@ -63,7 +63,8 @@ None.
 
 ## Running tasks
 
-State `running` while it runs; the stop gate reads it.
+State `running` while it runs; the stop gate reads it. Put `T3` in the runtime
+of a T3 child task or watched pull request: those wake the thread.
 
 | Task | Runtime, model, effort | Handle | Worktree / branch | State |
 |---|---|---|---|---|

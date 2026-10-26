@@ -123,6 +123,18 @@ class EffortGate(unittest.TestCase):
         self.assertIn('Export', output['reason'])
         self.assertIn('blocking wait', output['reason'])
 
+    def test_t3_owned_task_lets_any_runtime_stop(self):
+        self.write_effort(task='| Review | T3 child, Codex sol | task `review-r1` | main | running |')
+        for runtime in ('claude', None):
+            self.assertIsNone(self.run_gate('stop', runtime=runtime, t3=True))
+
+    def test_t3_owned_task_does_not_excuse_a_shell_job_beside_it(self):
+        self.write_effort(task='| Review | T3 child | task `review-r1` | main | running |\n'
+                               '| Export | codex exec | run-7 | main | running |')
+        reason = self.run_gate('stop', t3=True)['reason']
+        self.assertIn('Export', reason)
+        self.assertNotIn('Review', reason.split('running task')[1])
+
     def test_under_t3_a_running_task_allows_stop_without_a_heartbeat(self):
         self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
         self.assertIsNone(self.run_gate('stop', runtime='claude', t3=True))

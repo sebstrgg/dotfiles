@@ -36,8 +36,10 @@ work is the judgment, or when the brief would cost more than doing it.
   thread, and its completion wakes you: end the turn instead of polling.
   `isolation: worktree` starts from your local commit; uncommitted edits are
   not copied, and it needs a project rooted in a git repository.
-- Same-family Claude work with no model options: the native Agent tool, with
-  `model` and `effort` on every call.
+- The native Agent tool only for Claude work on a model it supports, when
+  you request no model options and `orchestrator_capabilities` shows none
+  inherited: quick reading, search and extraction. Anything else in T3 goes
+  through `delegate_task`, so it shows up as a thread.
 - A follow-up round is a new `delegate_task` carrying the brief, earlier
   findings and your answers, never `t3_thread_send` to the child.
 - Outside T3, Claude uses the `codex` plugin for Codex reviews and rescue;
@@ -67,6 +69,10 @@ work is the judgment, or when the brief would cost more than doing it.
 
 - `verify` runs in a fresh child from the other model family: Claude-built
   work goes to Codex, Codex-built work to Claude. A same-family verify counts
-  only when Sebastian ruled the other family out, recorded under Decisions.
-  A fork of your own context is not fresh.
+  only when Sebastian ruled the other family out, or the target is out of its
+  reach (a tool, sign-in or device only your family has): record
+  `verifier: <runtime>` in the effort file's front matter with the evidence
+  under Decisions. When the other family just cannot run now (signed out,
+  usage limit), the items stay open or go `blocked`. A fork of your own
+  context is not fresh.
 - Cross-family code review: `review-loop`.

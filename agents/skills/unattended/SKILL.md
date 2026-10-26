@@ -22,11 +22,12 @@ While he is away:
 
 - Run independent lanes in parallel (`delegate`); never leave a lane idle
   waiting on another that it does not depend on.
-- T3 child tasks and watched pull requests wake you; background shell jobs
-  wake you when they exit. A T3 restart can end your turn and kill shell
-  jobs, so while anything runs keep one hourly `schedule_task` bound to this
-  thread: re-read the effort file, restart any wait that is gone, judge the
-  milestones. Delete it once nothing runs.
+- T3 child tasks and watched pull requests wake you; they need no
+  heartbeat. Background shell jobs wake you when they exit, but a T3 restart
+  kills them without a word, so while one runs keep one hourly
+  `schedule_task` bound to this thread: re-read the effort file, restart any
+  wait that is gone, judge the milestones. Record its handle under "Running
+  tasks" and delete it once no shell job runs.
 - A missed milestone: change approach, don't wait for morning. Two rounds with
   no new evidence on one problem: stop that lane and re-route it.
 
