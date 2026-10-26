@@ -24,14 +24,15 @@ brief can carry, Claude keeps the judgment.
 | Implementation: tickets, refactors, migrations, tests, CI fixes, infrastructure, data and logs, parallel lanes | Codex `gpt-6.1-sol` | `high`; `xhigh` when complex or high-stakes |
 | Code review | `gpt-6.1-sol` | the review table below |
 | Verifying Claude-built work | `gpt-6.1-sol` | `high` |
-| Design, UI, copy and product decisions; review of designs, rendered UI and copy | Claude `claude-opus-5-5` | `high` |
+| Design, UI, copy and product decisions | Claude `claude-opus-5-5` | `high` |
+| Review of a design, rendered UI or copy | `gpt-6.1-sol` for the other family's eye on the brief, layout, states and accessibility; `claude-opus-5-5` when it turns on taste, voice or brand | the review table below |
 | A diagnosis Sol could not crack; cross-module integration | `claude-opus-5-5` | `high` |
 | Verifying Codex-built work | `claude-opus-5-5` | `medium` |
 | Claude-side work without Opus's judgment: reading and extraction across code, logs and transcripts, checklist browser walks (Opus judges), docs and PR bodies from settled decisions | `claude-sonnet-5-5` | `medium` |
 | A tiny bounded lookup | Haiku (native Agent) or `gpt-6-luna` | `low` |
 
 - **"Prioritize Codex":** Sol also takes the Sonnet row and the first pass of
-  a hard diagnosis. Claude keeps design, UI and copy judgment and verifying
+  a hard diagnosis. Claude keeps design, UI and copy work and verifying
   Codex-built work.
 - **"Prioritize Claude":** Opus or Sonnet also take implementation lanes. Sol
   keeps code review and verifying Claude-built work.
@@ -68,19 +69,21 @@ Always set the effort: Sol defaults to `low`.
 
 ## Briefs
 
-- Give the outcome, the real target and how done is proven, the boundaries
-  (files, authority, what to leave alone) and what to report. Use pointers
-  (effort file, spec, commits), not copies. A child knows only its brief and
-  the global instructions: put every rule and fact it needs in the brief.
-- A child starts no reviewers, verifiers or further children and makes no
-  paid calls.
+- Give the outcome in Sebastian's words, the real target and how done is
+  proven, the boundaries (files, authority, what to leave alone) and what to
+  report. Use pointers (effort file, spec, commits), not copies. A child
+  knows only its brief and the global instructions: put every rule and fact
+  it needs in the brief.
+- A child starts no reviewers, verifiers or further children, makes no paid
+  calls and asks nothing: it takes its recommendation on what can be undone
+  and lists it in its report; a finding that changes the outcome or a
+  reserved action ends its run with the question in its report.
 - One writer per file or resource. Give each lane its own worktree and build
   cache (a `CARGO_TARGET_DIR`), and clean only what is yours. Children commit
   locally; the orchestrator pushes and opens the pull request.
 - A child's "done" is a claim: check it another way. Stop a lane after two
   rounds with no new evidence, then re-brief or re-route it.
-- UI lanes get the approved design and a way to see their result; Claude
-  reviews the rendering.
+- UI lanes get the approved design and a way to see their result.
 
 Bad: "Fix the ranking bug we discussed." The child never saw that
 discussion.
@@ -96,9 +99,8 @@ A fresh reviewer checks code where a missed bug is expensive before its pull
 request goes ready. You own the code: fix what is right, push back on what is
 wrong. Review makes the change correct, not bigger.
 
-- **Reviewer:** one at a time, always a fresh child, from the table above:
-  Sol for code, Opus for a design, rendered UI or copy. A design or mockup
-  gets one review and one re-check, then it is frozen.
+- **Reviewer:** one at a time, always a fresh child, from the table above.
+  A design or mockup gets one review and one re-check, then it is frozen.
 - **Effort:** match the stakes, not the habit. The highest row that applies
   wins, however small the diff.
   - `xhigh`: security, auth, secrets, money, data loss, migrations,

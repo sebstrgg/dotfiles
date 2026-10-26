@@ -35,15 +35,16 @@ instructions) is made, checked once on the real target and reported.
 - Otherwise: `~/dotfiles/bin/effort-gate new <effort>` creates
   `.scratch/<effort>/effort.md` from [the template](templates/effort.md).
   Fill in the brief before any product edit or background job:
-  - **Outcome**, and **done when** items checkable on the real target. A
-    named quality (fast, secure) is a measured item; a change to persisted
-    state has an item that the new build starts on a copy of current data.
+  - **Outcome**, quoting his words, and **done when** items checkable on
+    the real target. A named quality (fast, secure) is a measured item; a
+    change to persisted state has an item that the new build starts on a
+    copy of current data.
   - **Out**: what to stop and ask about. Everything else you decide.
   - **Approved**, **Not approved** and **Budget**.
-- Unsettled intent: one round of numbered questions, each with your
-  recommendation, and only the ones where Sebastian's answer changes the
-  outcome. State the rest as decisions. A new project or big feature with
-  unsettled intent: `grilling`.
+- Unsettled intent: one round of numbered questions now, while Sebastian is
+  here, each with your recommendation, and only the ones where his answer
+  changes the outcome. State the rest as decisions. A new project or big
+  feature with unsettled intent: `grilling`.
 - Work that will run while Sebastian is away: `unattended` before he leaves.
 
 Playbooks in `~/.agents/skills` (`grilling`, `to-spec`, `to-tickets`,
@@ -112,9 +113,9 @@ finding outside the list goes into the report as a recommendation.
   Delete plan, spec and ticket files the work made obsolete.
 - Set the effort file to `status: done`; the weekly review removes it.
 - Remove the worktrees, branches, containers and jobs this work created.
-- Report per the global instructions: what is blocked on Sebastian first, then
-  the outcome, evidence (name any substitute check) and decisions worth
-  knowing. Open reserved actions go through the question tool.
+- Report per the global instructions: what is blocked on Sebastian first,
+  then the calls he may overrule, the outcome and evidence (name any
+  substitute check). Open reserved actions go through the question tool.
 - After substantial rework, an escaped defect or repeated steering: `retro`,
   and fix the environment (a check, a tool, one rule) rather than add prose.
 

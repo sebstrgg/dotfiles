@@ -97,5 +97,5 @@ Great catch! Fixed.
   closes. Then call `unwatch_pull_request`, so the thread returns to
   Sebastian's inbox.
 - Stopping early: unwatch first and say why.
-- Another merged change already does this work: ask before closing the pull
-  request.
+- Another merged change already does this work: close the pull request with
+  a comment linking that change, and name it in the report.

@@ -9,11 +9,10 @@ Read for any UI, visual design or user-facing copy, in either runtime.
   `/design-sync` in Claude Code) and the `frontend-design` skill.
 - **Codex builds** to the design system and the handed-over design. A design gap
   goes back to Claude; Codex does not choose visual direction.
-- **Claude reviews** the rendered result against the design and this reference
-  before it counts as done.
-- A design or mockup gets one review (reviewer per `delegate`) and one
-  re-check, then it is frozen: later details become acceptance checks in the
-  build, not another design round.
+- **Review**: the reviewer `delegate` picks checks the rendered result
+  against the design and this reference before it counts as done. A design
+  or mockup gets one review and one re-check, then it is frozen: later
+  details become acceptance checks in the build, not another design round.
 - UI with no approved direction yet, however small (one page, one screen):
   Claude presents distinct alternatives and Sebastian picks before the build.
   Inside an approved direction: proceed and show the result.
