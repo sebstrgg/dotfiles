@@ -16,6 +16,8 @@ Read-only apart from step 5: nudge no thread, fix nothing.
    thread it names and read its Next and newest messages. An effort that
    waits on a scheduled run is not late; one that waits on Sebastian belongs
    under "Waits on you"; one whose blocker is its own running work does not.
+   An effort waiting on an event that no running task, schedule or watch
+   checks for is stalled.
    A pull request counts as handed over only when its thread says so. A
    decision he already gave (Approved, Decisions, his later messages) is not
    waiting. Take times from the reader or T3's records, never estimate them.
