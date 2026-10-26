@@ -14,7 +14,9 @@ a fresh session is needed.
 The fresh session reads only the effort file and the files it links. Make sure
 it holds the brief with every approval, the "done when" table with honest
 statuses, decisions with reasons, running tasks with resume handles, and the
-next step. Link specs, tickets and commits instead of copying them.
+next step. Link specs, tickets and commits instead of copying them. Keep the
+front matter as `effort-gate` wrote it (`status: active`): the stop gate reads
+it, and the new session's `claim` sets `session:`.
 
 ## 2. Start the continuation yourself
 
@@ -33,4 +35,5 @@ not carry. Do not restate global instructions.
 ## 3. Close this session
 
 Finish or cancel this session's background jobs, record the new thread in
-the effort file, and report where the work continues as a thread link.
+the effort file's body (never its front matter, which the new owner holds),
+and report where the work continues as a thread link.
