@@ -1,75 +1,168 @@
 #!/usr/bin/env python3
-"""Print Sebastian's own messages from local Claude Code and Codex sessions as TSV.
-
-  agent-messages [--days N]
-
-Columns: timestamp, runtime, session file, text (first 300 characters, one line).
-Subagent sidechains, injected context blocks, automated notifications and
-`codex exec` workers are skipped. Headless Claude runs started from a T3 session
-carry the same metadata as T3 messages and are not separable here.
-Reads ~/.claude/projects and ~/.codex/sessions; writes nothing.
-"""
+"""Read Sebastian's messages and agent usage from T3's local database, read-only."""
 import argparse
+from collections import Counter
+from contextlib import closing
+from datetime import datetime, timedelta, timezone
 import json
-import sys
-import time
+import math
 from pathlib import Path
+import re
+import sqlite3
+import sys
+from zoneinfo import ZoneInfo
 
-AUTOMATED = ('<', 'Caveat:', 'Update on pull request', 'This session is being continued',
-             '[Request interrupted', 'Base directory for this skill')
+STOCKHOLM = ZoneInfo('Europe/Stockholm')
+DATABASE = Path.home() / '.t3' / 'userdata' / 'statev2.sqlite'
+HUMAN = """role = 'user'
+    AND json_extract(payload_json, '$.createdBy') = 'user'
+    AND json_extract(payload_json, '$.creationSource') IN ('web', 'mobile')"""
+MESSAGE_WINDOW = 'julianday(created_at) >= julianday(?) AND julianday(created_at) < julianday(?)'
+ITEM_WINDOW = 'julianday(updated_at) >= julianday(?) AND julianday(updated_at) < julianday(?)'
+TOOL_PREFIXES = ('mcp__t3-code__', 't3-code.')
+COMMAND_PATTERNS = {
+    'agent-run start': r'(?<![\w-])agent-run\s+start\b',
+    'agent-run wait': r'(?<![\w-])agent-run\s+wait\b',
+    'hand_rolled_ci_waits': (
+        r'\bgh\s+run\s+watch\b|\bgh\s+pr\s+checks\b[^\n;&|]*--watch\b'
+        r'|\b(?:until|while)\b(?:(?!\bdone\b)[\s\S])*?\bgh\s+(?:run|pr)\b'),
+    'sleep': r'\bsleep\s+',
+    'claude -p': r'(?<![\w-])claude\s+(?:[^\n;&|]*?\s)?(?:-p\b|--print\b)',
+    'codex exec': r'(?<![\w-])codex\s+exec\b',
+}
 
 
-def human(text):
-    text = ' '.join(str(text).split())
-    return text and not text.startswith(AUTOMATED)
+def iso_time(value):
+    """Interpret an ISO time without an offset in Europe/Stockholm."""
+    try:
+        result = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f'invalid ISO time: {value}') from error
+    if result.tzinfo is None:
+        result = result.replace(tzinfo=STOCKHOLM)
+    return result.astimezone(timezone.utc)
 
 
-def claude(path):
-    for line in path.open(errors='replace'):
+def arguments():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    for name in ('messages', 'usage'):
+        command = commands.add_parser(name)
+        window = command.add_mutually_exclusive_group()
+        window.add_argument('--days', type=float, help='rolling days before now (default: 7)')
+        window.add_argument('--since', type=iso_time, help='inclusive ISO time; no offset means Stockholm')
+        command.add_argument('--until', type=iso_time, help='exclusive ISO time; requires --since')
+    args = parser.parse_args()
+    if (args.since is None) != (args.until is None):
+        parser.error('--since and --until must be used together')
+    if args.since is not None:
+        since, until = args.since, args.until
+    else:
+        days = 7 if args.days is None else args.days
+        if not math.isfinite(days) or days <= 0:
+            parser.error('--days must be a positive finite number')
+        until = datetime.now(timezone.utc)
         try:
-            record = json.loads(line)
-        except ValueError:
-            continue
-        if record.get('type') != 'user' or record.get('isSidechain'):
-            continue
-        content = record.get('message', {}).get('content')
-        if isinstance(content, str) and human(content):
-            yield record.get('timestamp', ''), content
+            since = until - timedelta(days=days)
+        except OverflowError:
+            parser.error('--days exceeds the supported date range')
+    if since >= until:
+        parser.error('--since must be earlier than --until')
+    return args.command, (since.isoformat(), until.isoformat())
 
 
-def codex(path):
-    for line in path.open(errors='replace'):
-        try:
-            record = json.loads(line)
-        except ValueError:
-            continue
-        payload = record.get('payload') or {}
-        # Worker runs (`codex exec`) and subagents carry briefs, not Sebastian's words.
-        source = payload.get('source', '')
-        if record.get('type') == 'session_meta' and (source == 'exec' or 'subagent' in json.dumps(source)):
-            return
-        if record.get('type') != 'response_item' or payload.get('role') != 'user':
-            continue
-        for part in payload.get('content') or []:
-            if part.get('type') == 'input_text' and human(part.get('text', '')):
-                yield record.get('timestamp', ''), part['text']
+def messages(db, window):
+    query = f"""
+        SELECT m.created_at, m.thread_id, t.title, p.title,
+               json_extract(m.payload_json, '$.text'),
+               (SELECT substr(json_extract(a.payload_json, '$.text'), -700)
+                  FROM orchestration_v2_projection_messages AS a
+                 WHERE a.thread_id = m.thread_id AND a.role = 'assistant'
+                   AND a.created_at < m.created_at
+                   AND trim(coalesce(json_extract(a.payload_json, '$.text'), ''),
+                            char(9) || char(10) || char(13) || ' ') <> ''
+                 ORDER BY a.created_at DESC, a.message_id DESC LIMIT 1)
+          FROM orchestration_v2_projection_messages AS m
+          LEFT JOIN orchestration_v2_projection_threads AS t ON t.thread_id = m.thread_id
+          LEFT JOIN projection_projects AS p ON p.project_id = t.project_id
+         WHERE m.message_id IN (
+               SELECT message_id FROM orchestration_v2_projection_messages
+                WHERE {HUMAN} AND {MESSAGE_WINDOW})
+         ORDER BY m.created_at, m.message_id
+    """
+    for ts, thread_id, title, project, text, tail in db.execute(query, window):
+        yield {
+            'ts': iso_time(ts).astimezone(STOCKHOLM).isoformat(timespec='minutes'),
+            'thread_id': thread_id[:8],
+            'thread_title': title,
+            'project_title': project,
+            'text': text,
+            'prev_agent_tail': tail or '',
+        }
+
+
+def usage(db, window):
+    message_count, thread_count, wakes, heartbeats = db.execute(f"""
+        SELECT count(*) FILTER (WHERE {HUMAN}),
+               count(DISTINCT thread_id) FILTER (WHERE {HUMAN}),
+               count(*) FILTER (WHERE role = 'user'
+                   AND json_extract(payload_json, '$.creationSource') = 'mcp'),
+               count(*) FILTER (WHERE role = 'user'
+                   AND json_extract(payload_json, '$.creationSource') = 'mcp'
+                   AND instr(lower(json_extract(payload_json, '$.text')), 'eartbeat') > 0)
+          FROM orchestration_v2_projection_messages WHERE {MESSAGE_WINDOW}
+    """, window).fetchone()
+    tools, skills = Counter(), Counter()
+    questions = 0
+    shell = dict.fromkeys(COMMAND_PATTERNS, 0)
+    rows = db.execute(f"""
+        SELECT type, json_extract(payload_json, '$.toolName'),
+               json_extract(payload_json, '$.input.skill'),
+               CASE WHEN json_type(payload_json, '$.input') = 'text'
+                    THEN json_extract(payload_json, '$.input')
+                    ELSE json_extract(payload_json, '$.input.command') END
+          FROM orchestration_v2_projection_turn_items
+         WHERE type IN ('dynamic_tool', 'command_execution', 'user_input_request')
+           AND {ITEM_WINDOW}
+    """, window)
+    for kind, name, skill, command in rows:
+        if kind == 'dynamic_tool':
+            if isinstance(name, str):
+                for prefix in TOOL_PREFIXES:
+                    if name.startswith(prefix):
+                        tools[name.removeprefix(prefix)] += 1
+                        break
+            if name == 'Skill' and isinstance(skill, str) and skill:
+                skills[skill] += 1
+        elif kind == 'user_input_request':
+            questions += 1
+        elif isinstance(command, str):
+            for category, pattern in COMMAND_PATTERNS.items():
+                shell[category] += bool(re.search(pattern, command))
+    return {
+        'sebastian_messages': message_count,
+        'threads_with_messages': thread_count,
+        'scheduled_prompt_wakes': wakes,
+        'heartbeat_wakes': heartbeats,
+        't3_tool_calls': dict(sorted(tools.items())),
+        'skill_invocations': dict(sorted(skills.items())),
+        'user_input_requests': questions,
+        'shell_commands': shell,
+    }
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--days', type=float, default=7)
-    args = parser.parse_args()
-    since = time.time() - args.days * 86400
-    home = Path.home()
-    sources = [('claude', claude, home / '.claude/projects', '*/*.jsonl'),
-               ('codex', codex, home / '.codex/sessions', '**/*.jsonl')]
-    for runtime, reader, root, pattern in sources:
-        for path in sorted(root.glob(pattern)):
-            if path.stat().st_mtime < since:
-                continue
-            for timestamp, text in reader(path):
-                text = ' '.join(text.split())[:300]
-                sys.stdout.write(f'{timestamp}\t{runtime}\t{path}\t{text}\n')
+    command, window = arguments()
+    try:
+        with closing(sqlite3.connect(DATABASE.as_uri() + '?mode=ro', uri=True)) as db:
+            # One read transaction keeps both usage queries on the same live snapshot.
+            db.execute('BEGIN')
+            records = messages(db, window) if command == 'messages' else (usage(db, window),)
+            for record in records:
+                print(json.dumps(record, ensure_ascii=False))
+    except (sqlite3.Error, OSError) as error:
+        print(f'agent-messages: {error}', file=sys.stderr)
+        return 1
     return 0
 
 
