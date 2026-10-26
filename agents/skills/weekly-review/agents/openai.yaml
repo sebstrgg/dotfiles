@@ -1,0 +1,5 @@
+interface:
+  display_name: "Weekly review"
+  short_description: "Measure agent steering and propose one fix"
+policy:
+  allow_implicit_invocation: false

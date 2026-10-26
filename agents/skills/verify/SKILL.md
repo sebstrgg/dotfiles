@@ -1,6 +1,7 @@
 ---
 name: verify
 description: Independent check that work is really done. Use when dispatched to verify an effort's "done when" items against the real target before anything is reported as done.
+disable-model-invocation: true
 ---
 
 # Verify

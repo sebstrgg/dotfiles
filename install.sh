@@ -463,10 +463,18 @@ ok "Claude Code config linked"
 
 # Share workflow skills across local coding agents.
 mkdir -p "$HOME/.claude/skills" "$HOME/.codex/skills"
-for skill in engineering-workflow verify continue delegate weekly-review full-send full-stop babysit-pr review-loop prove-it unattended; do
+for skill in engineering-workflow delegate ship babysit-pr prove-it unattended verify continue weekly-review; do
     link_config "$SCRIPT_DIR/agents/skills/$skill" "$HOME/.claude/skills/$skill"
     link_config "$SCRIPT_DIR/agents/skills/$skill" "$HOME/.codex/skills/$skill"
 done
+# Drop links to skills this repository no longer has.
+for link in "$HOME"/.claude/skills/* "$HOME"/.codex/skills/*; do
+    if [[ -L "$link" && ! -e "$link" && "$(readlink "$link")" == "$SCRIPT_DIR/agents/skills/"* ]]; then
+        rm "$link"
+    fi
+done
+# Only the allowlisted skills load on their own; the rest stay callable by name.
+python3 "$SCRIPT_DIR/bin/skill-visibility" hide
 # The shared policy is private (gitignored); a public clone has no copy to link.
 if [[ -f "$SCRIPT_DIR/agents/global-instructions.md" ]]; then
     link_config "$SCRIPT_DIR/agents/global-instructions.md" "$HOME/.codex/AGENTS.md"

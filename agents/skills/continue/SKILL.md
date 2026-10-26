@@ -1,6 +1,7 @@
 ---
 name: continue
 description: Continue an effort in a fresh session. Use when an effort must move to a new session (end of an effort with follow-up work, switching runtime, degraded context) or when Sebastian asks for a handoff or continuation.
+disable-model-invocation: true
 ---
 
 # Continue

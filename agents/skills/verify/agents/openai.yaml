@@ -1,0 +1,5 @@
+interface:
+  display_name: "Verify"
+  short_description: "Independent check of an effort against its done-when list"
+policy:
+  allow_implicit_invocation: false

@@ -94,10 +94,16 @@ if [[ -f "$REPO_DIR/agents/global-instructions.md" ]]; then
     check_link "agents/global-instructions.md" "$HOME/.codex/AGENTS.md"
     check_link "agents/global-instructions.md" "$HOME/.claude/CLAUDE.md"
 fi
-for _skill in engineering-workflow verify continue delegate weekly-review full-send full-stop babysit-pr review-loop prove-it unattended; do
+for _skill in engineering-workflow delegate ship babysit-pr prove-it unattended verify continue weekly-review; do
     check_link "agents/skills/$_skill" "$HOME/.claude/skills/$_skill"
     check_link "agents/skills/$_skill" "$HOME/.codex/skills/$_skill"
 done
+if _visible=$(python3 "$REPO_DIR/bin/skill-visibility" check); then
+    ok "Only allowlisted skills load on their own"
+else
+    warn "Skills outside the allowlist load on their own (run install.sh):"
+    printf '%s\n' "$_visible" | grep -v 'platform-managed' | sed 's/^/      /'
+fi
 check_link "codex/hooks.json"           "$HOME/.codex/hooks.json"
 
 # ── 2. Copied configs (owned/rewritten by an app → not symlinked) ───

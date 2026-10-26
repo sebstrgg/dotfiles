@@ -1,0 +1,5 @@
+interface:
+  display_name: "Continue"
+  short_description: "Move an effort to a fresh session"
+policy:
+  allow_implicit_invocation: false

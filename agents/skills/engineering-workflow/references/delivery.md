@@ -1,24 +1,12 @@
 # Delivery
 
-## Branches and pull requests
+## Branches
 
-- One worktree, branch and port block per task.
-- Open pull requests as drafts and keep them in draft while iterating: drafts
-  run only fast checks, and every push to a ready PR starts a full run on the
-  shared CI farm and cancels the previous one. Mark the PR ready once, on the
-  commit `effort-gate release` marked (SKILL.md step 4), in its own command
-  after the push.
-- In Codex, start a `git push` or `gh pr`, `gh workflow` or `gh run` command
-  with `cd /absolute/path/to/checkout &&`: Codex leaves the shell tool's workdir out of what
-  the tripwire sees.
+- One worktree, branch and port block per task. Pull requests, merging and
+  deploying: `ship`.
 - Deploy once per release. Walks and verification findings go back into the
   local loop, so a round of fixes never costs a CI run, a deploy and a pin
   change of its own.
-- Merge one at a time into the integration branch through its PR, with green CI
-  on a head that contains the integration tip. Read the full `gh pr checks`
-  listing, not a watch exit code; a red check, even a known infrastructure
-  failure, blocks the merge until fixed.
-- Write PR bodies with `pr`.
 
 ## A secret in git history
 
@@ -42,16 +30,6 @@
   path with an explicit limit; report spend exactly.
 - Personal data used in an evaluation stays in a private folder outside the
   repository; check for it before every push.
-
-## Deploy
-
-- Deploys to Sebastian's own infrastructure proceed within the task. Connect
-  source revision → tested artifact → running version, use immutable artifact
-  references, and know the rollback before deploying.
-- After merging or deploying, restart every process that runs the changed code
-  and prove the new build is the one running. Then verify the user or operator
-  outcome live; for intermittent failures, observe long enough to trust the
-  fix.
 
 ## Clean-up
 

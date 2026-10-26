@@ -42,10 +42,13 @@ the report and doc-only clean-up. Budget: about 30 minutes.
 - Put each rate next to last week's (the newest earlier report) and the
   baseline in `2026-10-26-baseline.md`. A change of a few points on a few
   hundred messages is noise; say so.
-- Check that the skills are used where they should be: are `full-send`,
-  `prove-it`, `review-loop` and `babysit-pr` loaded in threads that shipped
-  or proved changes? Is delegation going through `delegate_task`, PR waits
-  through `watch_pull_request`, blocking questions through the question tool?
+- Check that the skills are used where they should be: are `ship`,
+  `prove-it`, `delegate` and `babysit-pr` loaded in threads that shipped,
+  proved or reviewed changes? Is delegation going through `delegate_task`, PR
+  waits through `watch_pull_request`, blocking questions through the question
+  tool? Do posted PR comments open with the signature line from
+  `babysit-pr`? `~/dotfiles/bin/skill-visibility check` lists any skill that
+  loads on its own outside the allowlist.
 - Take the largest theme. Read two or three of its threads and ask what in
   the agent's context pointed it the wrong way (`retro`).
 

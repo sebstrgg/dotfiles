@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Keep the agents' auto-loaded skills to a short allowlist.
+
+Claude and Codex put every visible skill's description into each session and
+load a skill on their own when it seems to fit. Only the skills in AUTO_LOADED
+stay that way. Every other skill stays callable by name or path: Claude hides
+it with `disable-model-invocation: true` in its front matter, Codex with
+`policy.allow_implicit_invocation: false` in `agents/openai.yaml`.
+
+`hide` marks the third-party library in ~/.agents/skills, which its installer
+overwrites on update. `check` lists every visible skill outside the allowlist,
+including platform-managed ones, and exits 1 when it finds one this script can
+hide.
+"""
+import argparse
+from pathlib import Path
+import re
+import sys
+
+AUTO_LOADED = {'engineering-workflow', 'delegate', 'ship', 'babysit-pr', 'prove-it', 'unattended', 'wl7r'}
+HOME = Path.home()
+LIBRARY = HOME / '.agents' / 'skills'
+# Skills each runtime reads. Claude's `synced` folder and Codex's `.system`
+# folder are managed by the platforms themselves and are reported, not changed.
+SKILL_ROOTS = {
+    'claude': [HOME / '.claude' / 'skills', HOME / '.claude' / 'skills' / 'synced'],
+    'codex': [HOME / '.codex' / 'skills', HOME / '.codex' / 'skills' / '.system', LIBRARY],
+}
+CLAUDE_HIDDEN = re.compile(r'^disable-model-invocation:\s*true\s*$', re.MULTILINE)
+CODEX_HIDDEN = re.compile(r'^\s+allow_implicit_invocation:\s*false\s*$', re.MULTILINE)
+CODEX_POLICY = re.compile(r'^policy:\s*$', re.MULTILINE)
+
+
+def front_matter(text):
+    match = re.match(r'---\n(.*?)\n---\n', text, re.DOTALL)
+    return match.group(1) if match else ''
+
+
+def skill_dirs(root):
+    """Skill folders directly under root, or one level deeper for synced bundles."""
+    if not root.is_dir():
+        return []
+    found = []
+    for entry in sorted(root.iterdir()):
+        if entry.name.startswith('.') and entry.name != '.system':
+            continue
+        if (entry / 'SKILL.md').is_file():
+            found.append(entry)
+        elif entry.is_dir() and root.name == 'synced':
+            found.extend(child for child in sorted(entry.iterdir()) if (child / 'SKILL.md').is_file())
+    return found
+
+
+def hidden_from(runtime, skill):
+    if runtime == 'claude':
+        return bool(CLAUDE_HIDDEN.search(front_matter((skill / 'SKILL.md').read_text())))
+    policy = skill / 'agents' / 'openai.yaml'
+    return policy.is_file() and bool(CODEX_HIDDEN.search(policy.read_text()))
+
+
+def hide(skill):
+    """Mark one skill hidden in both runtimes; report whether anything changed."""
+    changed = False
+    path = skill / 'SKILL.md'
+    text = path.read_text()
+    head = front_matter(text)
+    if not head:
+        raise SystemExit(f'{path}: no front matter to mark')
+    if not CLAUDE_HIDDEN.search(head):
+        path.write_text(text.replace(head, head + '\ndisable-model-invocation: true', 1))
+        changed = True
+    policy = skill / 'agents' / 'openai.yaml'
+    current = policy.read_text() if policy.is_file() else ''
+    if not CODEX_HIDDEN.search(current):
+        if CODEX_POLICY.search(current):
+            updated = re.sub(r'^(\s+allow_implicit_invocation:).*$', r'\1 false', current, flags=re.MULTILINE)
+            if updated == current:
+                updated = CODEX_POLICY.sub('policy:\n  allow_implicit_invocation: false', current, count=1)
+        else:
+            updated = current.rstrip('\n') + ('\n' if current else '') + 'policy:\n  allow_implicit_invocation: false\n'
+        policy.parent.mkdir(exist_ok=True)
+        policy.write_text(updated)
+        changed = True
+    return changed
+
+
+def visible_outside_allowlist():
+    seen = {}
+    for runtime, roots in SKILL_ROOTS.items():
+        for root in roots:
+            for skill in skill_dirs(root):
+                if skill.name not in AUTO_LOADED and not hidden_from(runtime, skill):
+                    seen.setdefault(skill.resolve(), (skill.name, set()))[1].add(runtime)
+    return seen
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    parser.add_argument('command', choices=['hide', 'check'])
+    args = parser.parse_args()
+    if args.command == 'hide':
+        for skill in skill_dirs(LIBRARY):
+            if skill.name not in AUTO_LOADED and hide(skill):
+                print(f'hid {skill.name}')
+        return 0
+    fixable = False
+    for path, (name, runtimes) in sorted(visible_outside_allowlist().items(), key=lambda item: item[1][0]):
+        managed = 'synced' in path.parts or '.system' in path.parts
+        fixable |= not managed
+        note = ' (platform-managed)' if managed else ''
+        print(f'{name}: auto-loaded in {", ".join(sorted(runtimes))}{note}')
+    return 1 if fixable else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

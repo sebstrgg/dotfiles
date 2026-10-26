@@ -34,14 +34,17 @@ instructions) is made, checked once on the real target and reported.
   unsettled intent: `grilling`.
 - Work that will run while Sebastian is away: `unattended` before he leaves.
 
+Playbooks in `~/.agents/skills` (`grilling`, `to-spec`, `to-tickets`,
+`implement-spec`, `codebase-design`, `domain-modeling`, `research`,
+`prototype`, `tdd`, `diagnosing-bugs`, `retro`) don't load on their own: read
+`~/.agents/skills/<name>/SKILL.md` and follow it. Steps in them that wait for
+the user are covered by the approved brief: decide, record, continue.
+
 ## 2. Plan
 
 - Small work: the effort file is the plan.
 - Work spanning sessions or parallel lanes: `to-spec`, `to-tickets`, then
-  `implement-spec` with lanes per `delegate`. These and `retro` are commands,
-  not callable skills: read `~/.agents/skills/<name>/SKILL.md` and follow it.
-  Steps in them that wait for the user are covered by the approved brief:
-  decide, record, continue.
+  `implement-spec` with lanes per `delegate`.
 - On demand: `codebase-design`, `domain-modeling`, `research`, `prototype`.
 - UI, visual design or copy: [design reference](references/design.md).
 - New project or onboarding a repository: [baseline](references/new-project.md).
@@ -62,25 +65,25 @@ instructions) is made, checked once on the real target and reported.
    local build against a copy of the real state when it ships through CI.
 2. The CI job's fast steps (lint, format, types) and the tests that exercise
    changed code, locally.
-3. Code where a missed bug is expensive: `review-loop`.
+3. Code where a missed bug is expensive: the review loop in `delegate`.
 4. Once nothing blocks, that commit is the release: commit everything, run
    `~/dotfiles/bin/effort-gate release "<why>"`, and start full CI once (mark
    the draft ready). The tripwire holds a full run on any other commit.
 
 ## 5. Deliver
 
-[Delivery](references/delivery.md): branches, pull requests, merge, deploy,
-clean-up. `full-send` carries a change to merged and deployed without
-Sebastian; `full-stop` stops at ready to merge. Pull requests are watched
-with `babysit-pr`.
+`ship`: the pull request, its title and body, the merge gate, merge and
+deploy, or a hand-over at ready-to-merge. `babysit-pr` watches it.
+[Delivery](references/delivery.md): a secret in history, shared areas, CI
+data and spend, clean-up.
 
 ## 6. Verify
 
 A fresh verifier from the other model family runs `verify` against the "done
 when" list on the real target, after deploy when the outcome lives on a
-deployed service: `delegate_task` per `delegate`. Fix every failure on the
-agreed list as one new release and verify again. A finding outside the list
-goes into the report as a recommendation.
+deployed service: `delegate_task` with the verify brief in `delegate`. Fix
+every failure on the agreed list as one new release and verify again. A
+finding outside the list goes into the report as a recommendation.
 
 ## 7. Close
 

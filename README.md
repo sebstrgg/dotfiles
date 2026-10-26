@@ -175,24 +175,28 @@ machine. Start a new agent session after installation.
 - **Policy.** `agents/global-instructions.md` is private (gitignored) and is
   linked as `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. A public clone has
   no copy; the installer warns and skips it.
-- **Skills**, linked into both runtimes. Each description names the
-  situation and the phrases that should load it, so agents pick skills up
-  themselves.
-  [`engineering-workflow`](agents/skills/engineering-workflow/SKILL.md) is the
-  path from request to verified result and routes to the rest:
-  [`prove-it`](agents/skills/prove-it/SKILL.md) (evidence on the real target),
-  [`review-loop`](agents/skills/review-loop/SKILL.md) (budgeted cross-family
-  review), [`babysit-pr`](agents/skills/babysit-pr/SKILL.md) (a pull request to
-  green through T3's watcher), [`full-send`](agents/skills/full-send/SKILL.md)
-  and [`full-stop`](agents/skills/full-stop/SKILL.md) (end to end to merged, or
-  to ready-to-merge), [`unattended`](agents/skills/unattended/SKILL.md) (work
-  while Sebastian is away), [`delegate`](agents/skills/delegate/SKILL.md)
-  (models and child agents through T3's `delegate_task`),
-  [`verify`](agents/skills/verify/SKILL.md) (the independent done-check) and
-  [`continue`](agents/skills/continue/SKILL.md) (a fresh session from an
-  effort file). Matt Pocock's library is installed separately under
-  `~/.agents/skills`. [`weekly-review`](agents/skills/weekly-review/SKILL.md)
-  runs on a T3 schedule in the dotfiles project.
+- **Skills**, linked into both runtimes. Six load on their own, each
+  description naming the situation and the phrases that should trigger it:
+  [`engineering-workflow`](agents/skills/engineering-workflow/SKILL.md) (the
+  path from request to verified result, routing to the rest),
+  [`delegate`](agents/skills/delegate/SKILL.md) (child agents through T3's
+  `delegate_task`, the cross-family review loop, verification),
+  [`ship`](agents/skills/ship/SKILL.md) (pull request, merge gate, merge and
+  deploy, or a hand-over at ready-to-merge),
+  [`babysit-pr`](agents/skills/babysit-pr/SKILL.md) (a pull request to green
+  through T3's watcher, with signed replies),
+  [`prove-it`](agents/skills/prove-it/SKILL.md) (evidence on the real target)
+  and [`unattended`](agents/skills/unattended/SKILL.md) (work while Sebastian
+  is away). [`verify`](agents/skills/verify/SKILL.md),
+  [`continue`](agents/skills/continue/SKILL.md) and
+  [`weekly-review`](agents/skills/weekly-review/SKILL.md) are read by path
+  from a brief or a schedule; the weekly review runs on a T3 schedule in the
+  dotfiles project. Matt Pocock's library is installed separately under
+  `~/.agents/skills`; [`bin/skill-visibility`](bin/skill-visibility) `hide`
+  (run by the installer) keeps it from loading on its own, so the agents
+  read those playbooks by path when `engineering-workflow` sends them there,
+  and `check` (run by the doctor) lists any skill outside the allowlist that
+  still loads on its own.
 - **Effort files.** Work state lives in `.scratch/<effort>/effort.md` in the
   project (gitignored). [`bin/effort-gate`](bin/effort-gate) `new <effort>`
   creates one from
