@@ -12,11 +12,11 @@ Two modes:
 - **Ready** ("full stop", "don't merge", "I'll merge it myself"): stop at a
   pull request that passes the merge gate and hand it to Sebastian.
 
-He is not watching either way. Report only at the mode's end or on a real
-block. Granted in both modes: pushing, opening and updating the pull request,
-`git push --force-with-lease` to its own branch after a rebase. Land adds
-merging when the gate passes and deploying to his own infrastructure. Nothing
-here widens what the global instructions reserve for him.
+When he hands a change over with one of these phrases, he is not watching:
+report only at the mode's end or on a real block. Without such a hand-over,
+follow the same steps but keep him informed as usual. Granted in both modes:
+`git push --force-with-lease` to the pull request's own branch after a
+rebase. Nothing here widens what the global instructions reserve for him.
 
 ## Steps
 
@@ -57,25 +57,12 @@ differently, then the proof and the risk. A reviewer knows why from the first
 two lines. Leave out the inventory of files, functions and tests: the diff
 shows it.
 
-```markdown
-## Problem
-<one or two sentences from the request or issue; link the issue>
-
-## Change
-<what behaves differently now; a diff-sketch, call tree or Mermaid diagram
-only when it says more than a sentence>
-
-## Proof
-<before and after: screenshots or a recording for UI, the failing then
-passing command for logic, live readback for a service>
-
-## Risk
-**Door:** one-way | two-way. **Blast radius:** <one word>. <rollback in one line>
-
-<when the review loop ran: rounds, reviewer model, verdict>
-
-Written by <model> in <Claude Code | Codex> on behalf of Sebastian.
-```
+Sections, in order: `## Problem`, `## Change`, `## Proof` (before and after:
+screenshots or a recording for UI, the failing then passing command for logic,
+live readback for a service), `## Risk` (**Door:** one-way or two-way,
+**Blast radius:** one word, the rollback). Then the review-loop line when it
+ran, and last: `Written by <model> in <Claude Code | Codex> on behalf of
+Sebastian.`
 
 `<model>` comes from `t3_thread_configuration` called with no arguments (its
 `model` field). Outside T3, use the model your system prompt names; if it
@@ -155,11 +142,9 @@ Deploy once per release, to his own infrastructure:
 
 ## Asking
 
-Ask only when you cannot continue alone: a reserved action, missing access,
-or a decision that changes the outcome. Use the question tool, and put
-everything in it: the pull request link, what blocks you, and the options
-with your recommendation first. While you wait, do everything that does not
-depend on the answer.
+A block you cannot clear goes through the question tool with everything in
+it: the pull request link, what blocks you, the options with your
+recommendation first. Meanwhile do everything that does not need the answer.
 
 ## Ready message and report
 

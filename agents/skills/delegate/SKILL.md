@@ -18,13 +18,22 @@ work is the judgment, or when the brief would cost more than doing it.
   refactors, migrations, tests and CI fixes, infrastructure, data and logs,
   parallel lanes, thorough reviews. `high` by default, `xhigh` for complex or
   high-stakes work and reviews.
-- **Claude Sonnet 5.5**: reading and extraction, checklist browser walks
-  (Opus judges), well-specified edits, docs from settled decisions.
-- **Codex `gpt-6-astra`**: second opinions on key designs.
+- **Claude Sonnet 5.5**: Claude-side work that needs Claude's tools but not
+  Opus's judgment: reading and extraction across code, logs and transcripts,
+  checklist browser walks (Opus judges), well-specified edits, docs and PR
+  bodies from settled decisions.
+- **Codex `gpt-6-astra`**: second opinions on key designs. `high`, or `xhigh`
+  when genuinely hard.
+- The hardest problems go to Opus or Astra, whichever fits. When the stakes
+  justify it, both work independently and the orchestrator compares.
 - Haiku and `gpt-6-luna`: tiny bounded tasks only. Never `max` effort: it
   costs many times more for almost nothing.
-- When Sebastian names a model or runtime, use it. Claude tokens are the
-  scarcest: give Sol everything a precise brief can carry.
+- When Sebastian names a model or runtime, use it.
+
+Claude tokens are the scarcest. A Claude orchestrator gives Sol everything a
+precise brief can carry and keeps the judgment. A Codex orchestrator runs its
+own Sol workers and brings in Opus for design, rendered-UI and copy review, a
+diagnosis Sol couldn't crack, and cross-family review.
 
 ## Starting a child
 
@@ -55,12 +64,16 @@ options. Always set the effort: Sol defaults to `low`.
 
 - Give the outcome, the real target and how done is proven, the boundaries
   (files, authority, what to leave alone) and what to report. Use pointers
-  (effort file, spec, commits), not copies.
+  (effort file, spec, commits), not copies. A child knows only its brief and
+  the global instructions: put every rule and fact it needs in the brief.
 - A child starts no reviewers, verifiers or further children and makes no
   paid calls.
-- One writer per file or resource, build caches and worktrees included.
-  Children commit locally; the orchestrator pushes and opens the pull
-  request.
+- One writer per file or resource. Give each lane its own build cache (a
+  `CARGO_TARGET_DIR`) and worktree, and clean only what is yours. Children
+  commit locally; the orchestrator pushes and opens the pull request.
+- State the model and effort of every dispatch in the effort file, and
+  report what each child actually ran on (`task_status`, or the child
+  thread's model).
 - A child's "done" is a claim: check it another way. Stop a lane after two
   rounds with no new evidence, then re-brief or re-route it.
 - UI lanes get the approved design and a way to see their result; Claude
