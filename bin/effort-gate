@@ -53,8 +53,9 @@ TEMPLATE = (Path(__file__).resolve().parents[1]
             / 'agents' / 'skills' / 'engineering-workflow' / 'templates' / 'effort.md')
 SESSION_VARIABLES = {'codex': 'CODEX_THREAD_ID', 'claude': 'CLAUDE_CODE_SESSION_ID'}
 RUNTIMES_THAT_WAKE = {'claude'}
-# A T3 child task, watched pull request or schedule wakes its thread in either runtime.
-T3_OWNED = re.compile(r'\bT3\b|delegate_task|watch_pull_request|schedule_task')
+# A row whose runtime names T3 (a child task, watched pull request or schedule)
+# wakes its thread in either runtime.
+T3_OWNED = re.compile(r'\bT3\b')
 
 
 def read_event():
@@ -140,6 +141,10 @@ def table_rows(text, section):
 def running_rows(text):
     return [row for row in table(text, 'running tasks')
             if re.search(r'\brunning\b', row.get('state', ''), re.IGNORECASE)]
+
+
+def row_runtime(row):
+    return next((value for key, value in row.items() if key.startswith('runtime')), '')
 
 
 def running_tasks(text):
@@ -354,7 +359,7 @@ def hold(path, text, items, session_id, runtime):
             f'Effort gate: the agent stopped {MAX_IDENTICAL_BLOCKS} times without progress. '
             f'{path} is now marked blocked; still open: {"; ".join(pending)}.')}
     unwoken = [row.get('task', '?') for row in running_rows(text)
-               if runtime not in RUNTIMES_THAT_WAKE and not T3_OWNED.search(' '.join(row.values()))]
+               if runtime not in RUNTIMES_THAT_WAKE and not T3_OWNED.search(row_runtime(row))]
     if tasks and not unwoken:
         return None
     if tasks:

@@ -32,9 +32,13 @@ COMMAND_PATTERNS = {
     'codex exec': r'(?<![\w-])codex\s+exec\b',
 }
 SHELLS = {'sh', 'bash', 'zsh'}
-HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?^\s*\2\b", re.DOTALL | re.MULTILINE)
-QUOTED = re.compile(r"'[^']*'|\"(?:\\.|[^\"\\])*\"")
-SKILL_READ = re.compile(r'skills/([\w-]+)/SKILL\.md\b')
+SHELL_SCRIPT_FLAGS = ('-c', '-lc', '-lic')
+OPERATORS = ('&&', '||', ';', '|')
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+SUBSTITUTION = re.compile(r'\$\(([^()]*)\)')
+SKILL_READ = re.compile(
+    r'(?<![\w-])(?:cat|sed|head|tail|nl|less|bat)\b[^\n;&|]*?'
+    r'skills/(?:\.system/)?([\w-]+)/SKILL\.md\b')
 
 
 def iso_time(value):
@@ -77,20 +81,74 @@ def arguments():
 
 
 def unwrapped(command):
-    """The script a `zsh -lc '...'` wrapper (Codex's form) runs, else the command."""
+    """`command` with each `zsh -lc '<script>'` wrapper (Codex's form) replaced by
+    the script it runs; the command itself when it does not parse."""
     try:
         argv = shlex.split(command)
     except ValueError:
         return command
-    if len(argv) >= 3 and Path(argv[0]).name in SHELLS and argv[-2] in ('-c', '-lc', '-lic'):
-        return argv[-1]
-    return command
+    if not any(Path(word).name in SHELLS for word in argv):
+        return command
+    parts, i = [], 0
+    while i < len(argv):
+        word = argv[i]
+        if (Path(word).name in SHELLS and i + 2 < len(argv)
+                and argv[i + 1] in SHELL_SCRIPT_FLAGS):
+            parts.append(argv[i + 2])
+            i += 3
+            # Skip the `$0` and positional arguments given to the script.
+            while i < len(argv) and argv[i] not in OPERATORS:
+                i += 1
+        else:
+            parts.append(word if word in OPERATORS else shlex.quote(word))
+            i += 1
+    return ' '.join(parts)
+
+
+def without_heredoc_bodies(script):
+    """`script` without the bodies of its heredocs; the opener line, and any
+    command after the redirection on it, stays."""
+    lines, kept, delimiters = script.split('\n'), [], []
+    for line in lines:
+        if delimiters:
+            if line.strip() == delimiters[0]:
+                delimiters.pop(0)
+            continue
+        kept.append(line)
+        delimiters = [match.group(2) for match in HEREDOC.finditer(line)]
+    return '\n'.join(kept)
 
 
 def executable(script):
-    """`script` without heredoc bodies and quoted strings, so text a command only
-    prints or writes is not counted as a command it runs."""
-    return QUOTED.sub("''", HEREDOC.sub('', script))
+    """`script` without comments, heredoc bodies and quoted text, so text a
+    command only prints or writes is not counted as a command it runs. Command
+    substitutions inside double quotes still run, so they stay."""
+    script = without_heredoc_bodies(script)
+    out, i, n = [], 0, len(script)
+    while i < n:
+        char = script[i]
+        if char == '\\':
+            out.append(script[i:i + 2])
+            i += 2
+        elif char == '#' and (i == 0 or script[i - 1] in ' \t\n;&|('):
+            end = script.find('\n', i)
+            i = n if end < 0 else end
+        elif char == "'":
+            end = script.find("'", i + 1)
+            if end < 0:
+                break  # unterminated: the rest is not a command
+            out.append("''")
+            i = end + 1
+        elif char == '"':
+            j = i + 1
+            while j < n and script[j] != '"':
+                j += 2 if script[j] == '\\' else 1
+            out.append(' ; '.join(SUBSTITUTION.findall(script[i + 1:j])) or "''")
+            i = j + 1
+        else:
+            out.append(char)
+            i += 1
+    return ''.join(out)
 
 
 def messages(db, window):
@@ -173,7 +231,7 @@ def usage(db, window):
             script = unwrapped(command)
             if provider == 'codex':
                 # Codex loads a skill by reading its file.
-                for name in set(SKILL_READ.findall(script)):
+                for name in set(SKILL_READ.findall(without_heredoc_bodies(script))):
                     skills['codex'][name] += 1
             script = executable(script)
             for category, pattern in COMMAND_PATTERNS.items():

@@ -135,6 +135,10 @@ class EffortGate(unittest.TestCase):
         self.assertIn('Export', reason)
         self.assertNotIn('Review', reason.split('running task')[1])
 
+    def test_t3_in_a_task_name_or_path_does_not_release_a_shell_job(self):
+        self.write_effort(task='| Build T3 Code | codex exec | /code/T3/run-7 | /code/T3 | running |')
+        self.assertEqual(self.run_gate('stop', t3=True)['decision'], 'block')
+
     def test_under_t3_a_running_task_allows_stop_without_a_heartbeat(self):
         self.write_effort(task='| Export | Bash, background | bg-1 | main | running |')
         self.assertIsNone(self.run_gate('stop', runtime='claude', t3=True))
