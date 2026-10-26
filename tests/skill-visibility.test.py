@@ -45,6 +45,14 @@ class Hide(unittest.TestCase):
             visibility.hide(skill)
             self.assertEqual((skill / 'agents' / 'openai.yaml').read_text(), 'policy:\n  allow_implicit_invocation: false\n')
 
+    def test_flips_an_explicit_claude_false_without_a_second_key(self):
+        with tempfile.TemporaryDirectory() as root:
+            skill = make_skill(root)
+            (skill / 'SKILL.md').write_text('---\nname: tdd\ndisable-model-invocation: false\n---\n\n# TDD\n')
+            visibility.hide(skill)
+            self.assertEqual((skill / 'SKILL.md').read_text(),
+                             '---\nname: tdd\ndisable-model-invocation: true\n---\n\n# TDD\n')
+
     def test_body_text_does_not_count_as_hidden(self):
         with tempfile.TemporaryDirectory() as root:
             skill = make_skill(root)

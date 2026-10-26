@@ -17,7 +17,8 @@ are not the look. Use the most direct proof the change allows.
   and the approved design. In T3 Code, in this order:
   1. `preview_open {"url": "localhost:5173/<page>"}`
   2. `preview_resize {"mode": "preset", "preset": "iphone-12-pro"}`, then
-     `{"mode": "fill"}` for desktop.
+     `{"mode": "freeform", "width": 1440, "height": 900}` for desktop. Check the
+     size it returns: a narrow pane cannot show a desktop layout.
   3. `preview_set_appearance {"colorScheme": "dark"}`, then `"light"`.
   4. `preview_snapshot {"save": true}` for each state. Embed the returned
      `screenshotPath` as `![<state>](<screenshotPath>)` in your reply: that is

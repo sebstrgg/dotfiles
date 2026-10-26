@@ -344,6 +344,14 @@ def hold(path, text, items, session_id, runtime):
     """Block the owner's stop while items are open or a task runs, until the stall
     cap marks the effort blocked."""
     tasks = running_tasks(text)
+    running = running_rows(text)
+    if tasks and all(T3_OWNED.search(row_runtime(row)) for row in running):
+        # T3 keeps these tasks' state and wakes the session when each ends, so
+        # stopping to wait is no stall. A background shell job can die without
+        # a word (a T3 restart), so it still counts toward the cap below.
+        return None
+    unwoken = [row.get('task', '?') for row in running
+               if runtime not in RUNTIMES_THAT_WAKE and not T3_OWNED.search(row_runtime(row))]
     pending = items or [f'{task} (running)' for task in tasks]
     rows = table_rows(text, 'done when') + table_rows(text, 'running tasks')
     signature = hashlib.sha256('\n'.join(rows).encode()).hexdigest()
@@ -358,8 +366,6 @@ def hold(path, text, items, session_id, runtime):
         return {'systemMessage': (
             f'Effort gate: the agent stopped {MAX_IDENTICAL_BLOCKS} times without progress. '
             f'{path} is now marked blocked; still open: {"; ".join(pending)}.')}
-    unwoken = [row.get('task', '?') for row in running_rows(text)
-               if runtime not in RUNTIMES_THAT_WAKE and not T3_OWNED.search(row_runtime(row))]
     if tasks and not unwoken:
         return None
     if tasks:

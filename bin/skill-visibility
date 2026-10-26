@@ -67,7 +67,10 @@ def hide(skill):
     if not head:
         raise SystemExit(f'{path}: no front matter to mark')
     if not CLAUDE_HIDDEN.search(head):
-        path.write_text(text.replace(head, head + '\ndisable-model-invocation: true', 1))
+        key = re.compile(r'^disable-model-invocation:.*$', re.MULTILINE)
+        marked = key.sub('disable-model-invocation: true', head, count=1) if key.search(head) \
+            else head + '\ndisable-model-invocation: true'
+        path.write_text(text.replace(head, marked, 1))
         changed = True
     policy = skill / 'agents' / 'openai.yaml'
     current = policy.read_text() if policy.is_file() else ''

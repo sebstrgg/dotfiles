@@ -128,6 +128,12 @@ class EffortGate(unittest.TestCase):
         for runtime in ('claude', None):
             self.assertIsNone(self.run_gate('stop', runtime=runtime, t3=True))
 
+    def test_waiting_on_a_t3_task_never_counts_as_a_stall(self):
+        path = self.write_effort(task='| Review | T3 child, Codex sol | task `review-r1` | main | running |')
+        for _ in range(8):
+            self.assertIsNone(self.run_gate('stop', t3=True))
+        self.assertNotIn('status: blocked', path.read_text())
+
     def test_t3_owned_task_does_not_excuse_a_shell_job_beside_it(self):
         self.write_effort(task='| Review | T3 child | task `review-r1` | main | running |\n'
                                '| Export | codex exec | run-7 | main | running |')

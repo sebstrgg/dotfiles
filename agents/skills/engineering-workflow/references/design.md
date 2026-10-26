@@ -11,9 +11,9 @@ Read for any UI, visual design or user-facing copy, in either runtime.
   goes back to Claude; Codex does not choose visual direction.
 - **Claude reviews** the rendered result against the design and this reference
   before it counts as done.
-- A design or mockup gets one review from the other family and one re-check,
-  then it is frozen: later details become acceptance checks in the build,
-  not another design round.
+- A design or mockup gets one review (reviewer per `delegate`) and one
+  re-check, then it is frozen: later details become acceptance checks in the
+  build, not another design round.
 - UI with no approved direction yet, however small (one page, one screen):
   Claude presents distinct alternatives and Sebastian picks before the build.
   Inside an approved direction: proceed and show the result.

@@ -103,8 +103,9 @@ finding outside the list goes into the report as a recommendation.
   open items. To stop legitimately: `status: blocked` with the blocker
   recorded, or `status: done` after `verify` passes.
 - Waiting: T3 child tasks and `watch_pull_request` wake you; end the turn
-  instead of polling. Any other job gets one background command whose exit
-  wakes you (the job itself, or a `gh run watch`), never a sleep loop. Record
-  each under "Running tasks" and update its row when it ends.
+  instead of polling. Any other job: Claude runs one background command whose
+  exit wakes it (the job itself, or a `gh run watch`); Codex runs one blocking
+  wait in the foreground. Never a sleep loop. Record each under "Running
+  tasks" and update its row when it ends.
 - Keep the effort file current whenever a decision, approval, item or next
   step changes. After compaction it is the source of truth.

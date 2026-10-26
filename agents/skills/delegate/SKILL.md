@@ -13,7 +13,7 @@ work is the judgment, or when the brief would cost more than doing it.
 
 - **Claude Opus 5.5**: the strongest judgment and eye for design. Intent,
   product and UI decisions, design and copy, cross-module integration, hard
-  diagnosis, review verdicts.
+  diagnosis.
 - **Codex `gpt-6.1-sol`**: the workhorse with the most capacity. Tickets,
   refactors, migrations, tests and CI fixes, infrastructure, data and logs,
   parallel lanes, thorough reviews. `high` by default, `xhigh` for complex or
@@ -46,7 +46,7 @@ options. Always set the effort: Sol defaults to `low`.
   "title": "Review: <effort> round 1",
   "role": "review",
   "target": {"providerInstanceId": "codex", "model": "gpt-6.1-sol",
-             "options": {"reasoningEffort": "xhigh"}},
+             "options": {"reasoningEffort": "<from the effort table below>"}},
   "mode": "async",
   "clientRequestId": "<effort>-review-r1",
   "task": "<the brief>"
@@ -111,14 +111,17 @@ A fresh reviewer checks code where a missed bug is expensive before its pull
 request goes ready. You own the code: fix what is right, push back on what is
 wrong. Review makes the change correct, not bigger.
 
-- **Reviewer:** `gpt-6.1-sol` in a fresh child, whoever wrote the code.
-  Design, rendered UI and copy go to `claude-opus-5-5` instead. One reviewer
-  at a time.
-- **Effort:** match the stakes, not the habit.
-  - `medium`: a small change in one module that is easy to roll back.
-  - `high`: ordinary logic changes.
+- **Reviewer:** one at a time, always a fresh child.
+  - Code: `gpt-6.1-sol`, whoever wrote it.
+  - Rendered UI and copy: `claude-opus-5-5`.
+  - A design or mockup Claude made: `gpt-6-astra`. It gets one review and one
+    re-check, then it is frozen.
+- **Effort:** match the stakes, not the habit. The highest row that applies
+  wins, however small the diff.
   - `xhigh`: security, auth, secrets, money, data loss, migrations,
     concurrency, or a large cross-module change.
+  - `high`: ordinary logic changes.
+  - `medium`: a small change in one module that is easy to roll back.
 - **Budget:** three rounds. Later rounds cover only the fixes and the
   findings still open. Stop early when a round returns only minors.
 - **Brief:**

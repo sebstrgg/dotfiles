@@ -12,10 +12,13 @@ description: Get an open pull request to green and mergeable - checks, review co
    ```sh
    gh pr checks <n>
    gh pr view <n> --comments    # top-level comments and bot summaries
-   gh api graphql -F owner=<owner> -F repo=<repo> -F n=<n> -f query='
-     query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){
-       pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved path line
-         comments(first:20){nodes{databaseId author{login} body}}}}}}}' \
+   gh api graphql --paginate -F owner=<owner> -F repo=<repo> -F n=<n> -f query='
+     query($owner:String!,$repo:String!,$n:Int!,$endCursor:String){
+       repository(owner:$owner,name:$repo){pullRequest(number:$n){
+         reviewThreads(first:100,after:$endCursor){
+           pageInfo{hasNextPage endCursor}
+           nodes{id isResolved path line
+             comments(first:50){nodes{databaseId author{login} body}}}}}}}' \
      --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)'
    ```
    Act on everything open, as in "Each wake".
@@ -58,7 +61,8 @@ reply opens with a signature line:
 **<model>** · <Claude Code | Codex> · on behalf of Sebastian
 ```
 
-Get `<model>` from `t3_thread_configuration` called with no arguments. Then
+Get `<model>` from `t3_thread_configuration` called with no arguments (its
+`modelSelection.model`). Then
 say what you did and where (the commit), or why you won't, in one or two
 sentences.
 

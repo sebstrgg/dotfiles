@@ -15,9 +15,13 @@ from zoneinfo import ZoneInfo
 
 STOCKHOLM = ZoneInfo('Europe/Stockholm')
 DATABASE = Path.home() / '.t3' / 'userdata' / 'statev2.sqlite'
+# Sebastian types in the web or mobile app; T3 records his answer to a Codex
+# question-tool request as a server message holding the question, then his answer.
 HUMAN = """role = 'user'
     AND json_extract(payload_json, '$.createdBy') = 'user'
-    AND json_extract(payload_json, '$.creationSource') IN ('web', 'mobile')"""
+    AND (json_extract(payload_json, '$.creationSource') IN ('web', 'mobile')
+         OR (json_extract(payload_json, '$.creationSource') = 'server'
+             AND json_extract(payload_json, '$.id') LIKE 'async-answer:%'))"""
 MESSAGE_WINDOW = 'julianday(created_at) >= julianday(?) AND julianday(created_at) < julianday(?)'
 ITEM_WINDOW = 'julianday(updated_at) >= julianday(?) AND julianday(updated_at) < julianday(?)'
 TOOL_PREFIXES = ('mcp__t3-code__', 't3-code.')
@@ -38,7 +42,8 @@ OPERATORS = ('&&', '||', ';', '|')
 # scan, so `<<'EOF'` opens a heredoc and `echo '<<EOF'` does not.
 HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)(\w+)\1|'[^']*'|\"(?:\\.|[^\"\\])*\"")
 SUBSTITUTION = re.compile(r'\$\(([^()]*)\)')
-SKILL_READER = re.compile(r'(?<![\w-])(?:cat|sed|head|tail|nl|less|bat)\b[^\n;&|]*')
+SKILL_READERS = {'cat', 'sed', 'head', 'tail', 'nl', 'less', 'bat'}
+SHELL_OPERATORS = {';', '&', '&&', '|', '||', '(', ')'}
 SKILL_FILE = re.compile(r'skills/(?:\.system/)?([\w-]+)/SKILL\.md\b')
 
 
@@ -152,10 +157,39 @@ def executable(script):
     return ''.join(out)
 
 
+def simple_commands(line):
+    """The words of each simple command on one shell line, comments dropped.
+    A line the shell lexer cannot split (an unclosed quote) yields nothing."""
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return
+    words = []
+    for token in tokens:
+        if token in SHELL_OPERATORS:
+            if words:
+                yield words
+            words = []
+        else:
+            words.append(token)
+    if words:
+        yield words
+
+
 def skills_read(script):
-    """Skills whose SKILL.md a reader command in `script` opens."""
-    return {name for reader in SKILL_READER.findall(without_heredoc_bodies(script))
-            for name in SKILL_FILE.findall(reader)}
+    """Skills whose SKILL.md a reader command in `script` opens. A reader that
+    writes (`cat > SKILL.md`) or appears only as quoted text does not count."""
+    found = set()
+    for line in without_heredoc_bodies(script).splitlines():
+        for words in simple_commands(line):
+            writes = any(word.startswith('>') and (i == 0 or words[i - 1] != '2')
+                         for i, word in enumerate(words))
+            if Path(words[0]).name not in SKILL_READERS or writes:
+                continue
+            found.update(name for word in words[1:] for name in SKILL_FILE.findall(word))
+    return found
 
 
 def messages(db, window):
@@ -217,13 +251,13 @@ def usage(db, window):
                CASE WHEN json_type(i.payload_json, '$.input') = 'text'
                     THEN json_extract(i.payload_json, '$.input')
                     ELSE json_extract(i.payload_json, '$.input.command') END,
-               t.default_provider
+               t.default_provider, i.status
           FROM orchestration_v2_projection_turn_items AS i
           LEFT JOIN orchestration_v2_projection_threads AS t ON t.thread_id = i.thread_id
          WHERE i.type IN ('dynamic_tool', 'command_execution', 'user_input_request')
            AND julianday(i.updated_at) >= julianday(?) AND julianday(i.updated_at) < julianday(?)
     """, window)
-    for kind, name, skill, command, provider in rows:
+    for kind, name, skill, command, provider, status in rows:
         if kind == 'dynamic_tool':
             if isinstance(name, str):
                 for prefix in TOOL_PREFIXES:
@@ -236,7 +270,7 @@ def usage(db, window):
             questions += 1
         elif isinstance(command, str):
             script = unwrapped(command)
-            if provider == 'codex':
+            if provider == 'codex' and status == 'completed':
                 # Codex loads a skill by reading its file.
                 for name in skills_read(script):
                     skills['codex'][name] += 1

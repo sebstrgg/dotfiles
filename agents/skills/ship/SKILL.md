@@ -65,7 +65,7 @@ ran, and last: `Written by <model> in <Claude Code | Codex> on behalf of
 Sebastian.`
 
 `<model>` comes from `t3_thread_configuration` called with no arguments (its
-`model` field). Outside T3, use the model your system prompt names; if it
+`modelSelection.model`). Outside T3, use the model your system prompt names; if it
 names none, write only the runtime.
 
 Bad: an inventory with no problem and no proof.
@@ -123,12 +123,16 @@ It passes when all of these hold:
 ```sh
 git log origin/<base> --first-parent -5 --format=%s
 gh pr merge <n> --squash --match-head-commit <headRefOid>
-git push origin --delete <branch>
+gh pr view <n> --json state,mergedAt,mergeCommit
 ```
 
 Use `--merge` instead of `--squash` when those subjects read
 `Merge pull request #…`. Don't pass `--delete-branch`: in a worktree it
 fails when it tries to switch branches.
+
+Only when `state` reads `MERGED`: `git push origin --delete <branch>`, then
+deploy. A merge queue leaves it `OPEN`: keep the watch until it merges, and
+treat a queue eviction as a failing check.
 
 Deploy once per release, to his own infrastructure:
 

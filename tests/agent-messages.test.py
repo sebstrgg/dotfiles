@@ -2,8 +2,10 @@
 """Tests for how agent-messages reads shell commands."""
 from importlib.machinery import SourceFileLoader
 import importlib.util
+import json
 from pathlib import Path
 import re
+import sqlite3
 import unittest
 
 SCRIPT = Path(__file__).resolve().parent.parent / 'bin' / 'agent-messages'
@@ -71,10 +73,57 @@ class SkillReads(unittest.TestCase):
         self.assertEqual(skill_reads('cat a/skills/delegate/SKILL.md b/skills/research/SKILL.md'),
                          {'delegate', 'research'})
 
+    def test_quoted_path_and_silenced_errors_still_count(self):
+        self.assertEqual(skill_reads('cat "/Users/s/.codex/skills/ship/SKILL.md" 2>/dev/null'), {'ship'})
+
+    def test_comment_quoted_example_or_write_does_not_count(self):
+        self.assertEqual(skill_reads('# cat ~/.codex/skills/delegate/SKILL.md'), set())
+        self.assertEqual(skill_reads("echo 'cat ~/.codex/skills/delegate/SKILL.md'"), set())
+        self.assertEqual(skill_reads('cat > ~/.codex/skills/delegate/SKILL.md <<EOF\nx\nEOF'), set())
+
     def test_mentioning_a_skill_path_does_not_count(self):
         self.assertEqual(skill_reads('echo ~/.codex/skills/delegate/SKILL.md'), set())
         self.assertEqual(skill_reads('test -f ~/.codex/skills/delegate/SKILL.md'), set())
         self.assertEqual(skill_reads('cat > f <<EOF\nskills/delegate/SKILL.md\nEOF'), set())
+
+
+class Usage(unittest.TestCase):
+    WINDOW = ('2026-10-01T00:00:00Z', '2026-11-01T00:00:00Z')
+
+    def database(self):
+        db = sqlite3.connect(':memory:')
+        db.executescript("""
+            CREATE TABLE orchestration_v2_projection_messages (
+                message_id TEXT, thread_id TEXT, role TEXT, created_at TEXT, payload_json TEXT);
+            CREATE TABLE orchestration_v2_projection_turn_items (
+                thread_id TEXT, type TEXT, status TEXT, updated_at TEXT, payload_json TEXT);
+            CREATE TABLE orchestration_v2_projection_threads (
+                thread_id TEXT, default_provider TEXT, title TEXT, project_id TEXT);
+            CREATE TABLE projection_projects (project_id TEXT, title TEXT);
+            INSERT INTO orchestration_v2_projection_threads VALUES ('t1', 'codex', 'T', NULL);
+        """)
+        return db
+
+    def add_message(self, db, message_id, source, payload_id=None):
+        payload = {'createdBy': 'user', 'creationSource': source, 'id': payload_id or message_id, 'text': 'x'}
+        db.execute("INSERT INTO orchestration_v2_projection_messages VALUES (?, 't1', 'user', ?, ?)",
+                   (message_id, '2026-10-20T10:00:00Z', json.dumps(payload)))
+
+    def test_question_tool_answers_count_as_his_messages(self):
+        db = self.database()
+        self.add_message(db, 'm1', 'web')
+        self.add_message(db, 'm2', 'server', 'async-answer:runtime-request:x')
+        self.add_message(db, 'm3', 'server', 'notification:x')
+        self.assertEqual(messages.usage(db, self.WINDOW)['sebastian_messages'], 2)
+        self.assertEqual(len(list(messages.messages(db, self.WINDOW))), 2)
+
+    def test_failed_skill_read_does_not_count(self):
+        db = self.database()
+        for status in ('completed', 'failed'):
+            db.execute("INSERT INTO orchestration_v2_projection_turn_items VALUES ('t1', 'command_execution', ?, ?, ?)",
+                       (status, '2026-10-20T10:00:00Z',
+                        json.dumps({'input': 'cat ~/.codex/skills/ship/SKILL.md'})))
+        self.assertEqual(messages.usage(db, self.WINDOW)['skill_loads']['codex'], {'ship': 1})
 
 
 if __name__ == '__main__':

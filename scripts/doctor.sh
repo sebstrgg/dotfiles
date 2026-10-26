@@ -99,7 +99,9 @@ for _skill in engineering-workflow delegate ship babysit-pr prove-it unattended 
     check_link "agents/skills/$_skill" "$HOME/.codex/skills/$_skill"
 done
 if _visible=$(python3 "$REPO_DIR/bin/skill-visibility" check); then
-    ok "Only allowlisted skills load on their own"
+    ok "Owned and library skills: only the allowlist loads on its own"
+    _managed=$(printf '%s\n' "$_visible" | grep -c 'platform-managed' || true)
+    [[ $_managed -gt 0 ]] && info "$_managed platform-managed skills also load on their own (not ours to hide)"
 else
     warn "Skills outside the allowlist load on their own (run install.sh):"
     printf '%s\n' "$_visible" | grep -v 'platform-managed' | sed 's/^/      /'
