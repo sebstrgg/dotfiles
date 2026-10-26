@@ -59,10 +59,10 @@ ask through the question tool with your recommendation.
 
 ## 4. Stale files
 
-In each repository under `~/code` with commits this week: effort files
-marked `done` or untouched for 14 days, plan, spec and ticket files for
-finished work, and docs that contradict the code. Fix doc-only staleness
-(check against the code, commit, merge); list the rest.
+In `~/dotfiles` and each repository under `~/code` with commits this week:
+effort files marked `done` or untouched for 14 days, plan, spec and ticket
+files for finished work, and docs that contradict the code. Fix doc-only
+staleness (check against the code, commit, merge); list the rest.
 
 ## Report
 
