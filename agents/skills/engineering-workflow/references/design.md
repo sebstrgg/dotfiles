@@ -13,9 +13,12 @@ Read for any UI, visual design or user-facing copy, in either runtime.
   against the design and this reference before it counts as done. A design
   or mockup gets one review and one re-check, then it is frozen: later
   details become acceptance checks in the build, not another design round.
-- UI with no approved direction yet, however small (one page, one screen):
-  Claude presents distinct alternatives and Sebastian picks before the build.
-  Inside an approved direction: proceed and show the result.
+- A product's UI, or UI others use, with no approved direction yet, however
+  small (one page, one screen): Claude presents distinct alternatives at
+  intake and Sebastian picks before the build. A plain page in a personal
+  tool without a design system: build it on the platform's defaults and list
+  it, with a screenshot, as a call he may overrule. Inside an approved
+  direction: proceed and show the result.
 
 ## Bespoke, never generic
 
