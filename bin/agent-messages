@@ -348,6 +348,18 @@ def github_pull_request(url):
         return None
 
 
+def github_merged(since):
+    """Pull requests by the account `gh` uses (the agents') merged since `since`, or None."""
+    stamp = since.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    try:
+        result = subprocess.run(['gh', 'search', 'prs', '--author', '@me', '--merged-at', f'>={stamp}',
+                                 '--json', 'url,title,closedAt', '--limit', '200'],
+                                capture_output=True, text=True, timeout=30, check=False)
+        return json.loads(result.stdout) if result.returncode == 0 else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
 def digest_tasks(db, row, gate):
     """The effort-gate t3_task_ended lookup, using our existing read transaction.
 
@@ -559,6 +571,17 @@ def digest(db, window):
               and tid not in active_threads
               and threads[tid]['payload'].get('status') != 'running'):
             result['waiting_on_sebastian'].append({**fields, 'reason': 'open_non_draft_pr_thread_not_running'})
+
+    # Most agent pull requests are never linked to a T3 thread; GitHub has them all.
+    merged = github_merged(since)
+    if merged is None:
+        errors.append({'operation': 'search_merged_pull_requests', 'error': 'gh search prs failed'})
+    linked = {entry.get('url') for entry in result['landed'] if entry['type'] == 'pull_request'}
+    for pr in merged or []:
+        finished = parsed_time(pr.get('closedAt'), {'url': pr.get('url'), 'operation': 'search_merged_pull_requests'})
+        if pr.get('url') not in linked and finished is not None and since <= finished < until:
+            result['landed'].append({'type': 'pull_request', 'url': pr['url'], 'pr_title': pr.get('title'),
+                                     'merged_at': digest_time(pr['closedAt']), 'state_source': 'github_search'})
 
     # Reuse the gate's front matter and tables, including its definition of an
     # open item and escaped Markdown pipes; loading it does not run its CLI.

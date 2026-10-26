@@ -28,7 +28,7 @@ Read-only apart from step 5: nudge no thread, fix nothing.
    - **Late:** overdue milestones, stalled efforts, tasks recorded as running
      that have ended, failed runs not resent (`resent_in_thread_id` empty),
      each with what step 2 found.
-   - **Landed:** efforts done, pull requests merged.
+   - **Landed:** efforts done; merged pull requests grouped by repository.
    - **Running:** one line of counts.
    Leave out an empty section. Nothing at all: one line, "Nothing needs you;
    <n> efforts running."
@@ -36,7 +36,8 @@ Read-only apart from step 5: nudge no thread, fix nothing.
 5. T3 runs each scheduled task in a fresh worktree of `~/dotfiles` and
    leaves it or its branch behind. Remove those of earlier digest and weekly
    runs, never other threads': worktrees and branches named
-   `t3/write-daily-digest*` or `t3/run-weekly-review*`, except this run's.
-   `git -C ~/dotfiles worktree remove <path>`, then `git -C ~/dotfiles
-   branch -d <branch>`; both refuse uncommitted or unmerged work, so leave
-   those and list them.
+   `t3/write-daily-digest*` or `t3/run-weekly-review*`, except the one you
+   are working in. Earlier runs have finished even when T3 keeps their
+   session process open. `git -C ~/dotfiles worktree remove <path>`, then
+   `git -C ~/dotfiles branch -d <branch>`; both refuse uncommitted or
+   unmerged work, so leave those and list them.

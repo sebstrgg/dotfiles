@@ -170,6 +170,7 @@ class Digest(unittest.TestCase):
                         ('p1', 'Project', str(self.root)))
         self.thread('t1')
         self.github = {}
+        self.merged = []
 
     def thread(self, tid, archived=None, deleted=None, **payload):
         self.db.execute('INSERT INTO orchestration_v2_projection_threads VALUES (?, ?, ?, ?, ?, ?)',
@@ -209,7 +210,8 @@ checkout: {checkout or root}
         # snapshot, None is a failed `gh` call.
         github = lambda url: self.github.get(url, {})
         with patch.object(messages, 'datetime', Clock), \
-                patch.object(messages, 'github_pull_request', github):
+                patch.object(messages, 'github_pull_request', github), \
+                patch.object(messages, 'github_merged', lambda since: self.merged):
             return messages.digest(self.db, window or self.WINDOW)
 
     def pr(self, state='open', draft=False, merged=None, tid='t1', number=1):
@@ -313,6 +315,20 @@ checkout: {checkout or root}
         self.assertEqual([r['effort_path'] for r in efforts], [str(waiting)])
         self.assertEqual(efforts[0]['blocked_items'], ['#1 Verify the result'])
         self.assertEqual(efforts[0]['blockers'], 'Waiting on Sebastian for the CI-side gate.')
+
+    def test_unlinked_merged_pull_requests_come_from_github(self):
+        linked = self.pr(state='merged', merged='2026-10-25T09:00:00Z', number=1)
+        self.merged = [
+            {'url': linked, 'title': 'Linked', 'closedAt': '2026-10-25T09:00:00Z'},
+            {'url': 'https://github.com/example/repo/pull/7', 'title': 'Unlinked', 'closedAt': '2026-10-25T10:00:00Z'},
+            {'url': 'https://github.com/example/repo/pull/8', 'title': 'Too late', 'closedAt': '2026-10-26T13:00:00Z'},
+        ]
+        out = self.run_digest()
+        urls = [r['url'] for r in out['landed'] if r['type'] == 'pull_request']
+        self.assertEqual(urls, [linked, 'https://github.com/example/repo/pull/7'])
+        self.merged = None
+        out = self.run_digest()
+        self.assertIn('search_merged_pull_requests', [e.get('operation') for e in out['errors']])
 
     def test_open_snapshot_is_checked_against_github(self):
         merged = self.pr(number=1)
@@ -492,6 +508,7 @@ checkout: {checkout or root}
 
         with patch.object(messages, 'DATABASE', path), patch.object(sys, 'argv', ['agent-messages', 'digest']), \
                 patch.object(messages.sqlite3, 'connect', opened), \
+                patch.object(messages, 'github_merged', lambda since: []), \
                 patch('builtins.print') as output:
             self.assertEqual(messages.main(), 0)
         output.assert_called_once()
