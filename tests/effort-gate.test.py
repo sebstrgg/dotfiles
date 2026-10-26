@@ -56,6 +56,7 @@ class EffortGate(unittest.TestCase):
         subprocess.run(['git', 'init', '-q', str(self.repo)], check=True)
         self.session = str(uuid.uuid4())
         self.t3_state = Path(self.tmp.name).resolve() / 'statev2.sqlite'
+        self.gate_state = Path(self.tmp.name).resolve() / 'gate-state'
         with sqlite3.connect(self.t3_state) as db:
             db.execute('CREATE TABLE orchestration_v2_projection_subagents '
                        '(subagent_id TEXT PRIMARY KEY, status TEXT NOT NULL, started_at TEXT)')
@@ -88,6 +89,7 @@ class EffortGate(unittest.TestCase):
             payload['last_assistant_message'] = last
         env = {k: v for k, v in os.environ.items() if k not in ('AGENT_RUN_ROLE', 'T3CODE_CLI_PATH')}
         env['T3_STATE_DB'] = str(self.t3_state)
+        env['EFFORT_GATE_STATE'] = str(self.gate_state)
         if t3:
             env['T3CODE_CLI_PATH'] = '/usr/local/bin/t3'
         if role:
@@ -496,6 +498,7 @@ class EffortGate(unittest.TestCase):
         env = {k: v for k, v in os.environ.items()
                if k not in ('CODEX_THREAD_ID', 'CLAUDE_CODE_SESSION_ID', 'AGENT_RUN_ROLE')}
         env.update(env_ids or {})
+        env['EFFORT_GATE_STATE'] = str(self.gate_state)
         command = ['python3', str(GATE), *args]
         if runtime:
             shell = Path(self.tmp.name) / 'bin' / runtime
@@ -518,6 +521,25 @@ class EffortGate(unittest.TestCase):
                                 capture_output=True, text=True, check=True).stdout
         self.assertEqual(status, '')
         self.assertEqual(self.run_gate('stop')['decision'], 'block')
+
+    def test_an_effort_is_found_from_the_folder_the_session_started_in(self):
+        result = self.run_command('new', 'login', env_ids={'CODEX_THREAD_ID': self.session})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        elsewhere = Path(self.tmp.name).resolve() / 'start'
+        elsewhere.mkdir()
+        self.assertEqual(self.run_gate('stop', cwd=elsewhere)['decision'], 'block')
+        self.assertIsNone(self.run_gate('stop', cwd=elsewhere, session=str(uuid.uuid4())))
+
+    def test_a_claimed_effort_is_found_from_anywhere_only_for_its_owner(self):
+        path = self.write_effort()
+        successor = str(uuid.uuid4())
+        self.run_command('claim', str(path), env_ids={'CLAUDE_CODE_SESSION_ID': successor})
+        elsewhere = Path(self.tmp.name).resolve() / 'start'
+        elsewhere.mkdir()
+        self.assertEqual(self.run_gate('stop', cwd=elsewhere, session=successor)['decision'],
+                         'block')
+        self.run_command('claim', str(path), env_ids={'CLAUDE_CODE_SESSION_ID': self.session})
+        self.assertIsNone(self.run_gate('stop', cwd=elsewhere, session=successor))
 
     def test_new_keeps_an_existing_effort(self):
         path = self.write_effort()

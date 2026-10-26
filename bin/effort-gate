@@ -15,7 +15,10 @@
 An effort file is `.scratch/<effort>/effort.md` with front matter `status: active`
 (or `done`, which is held too while an item is unfinished), `checkout:` naming
 the checkout it lives in and `session:` naming the owning session. The gate
-looks in every worktree of the session's repository. Only the owner is gated:
+looks in every worktree of the session's repository, and at each file `new` or
+`claim` recorded for the session (a session started in one folder often works
+in another checkout, and its hooks report the folder it started in). Only the
+owner is gated:
 other sessions in the same checkout, and copies of the file in a checkout their
 `checkout:` does not name, never match.
 
@@ -201,23 +204,56 @@ def worktree_roots(cwd):
     return [root] + [tree for tree in others if tree != root]
 
 
+def recorded_path(session_id):
+    state = Path(os.environ.get('EFFORT_GATE_STATE') or Path.home() / '.local/state/effort-gate')
+    return state / 'sessions' / hashlib.sha256(str(session_id).encode()).hexdigest()[:16]
+
+
+def record(session_id, path):
+    """Remember that the session owns `path`, wherever its hooks later run from."""
+    index = recorded_path(session_id)
+    try:
+        known = index.read_text().splitlines() if index.exists() else []
+        if str(path) not in known:
+            index.parent.mkdir(parents=True, exist_ok=True)
+            index.write_text(''.join(f'{line}\n' for line in [*known, str(path)]))
+    except OSError as error:
+        print(f'effort-gate: could not record {path} for this session ({error}); its hooks '
+              'find it only when run from its checkout', file=sys.stderr)
+
+
+def recorded(session_id):
+    try:
+        lines = recorded_path(session_id).read_text().splitlines()
+    except OSError:
+        return []
+    return [Path(line) for line in lines if line.strip()]
+
+
 def owned_efforts(cwd, session_id):
     """(path, text, status) of each effort file the session owns in any worktree
-    of this repository, counted only in the checkout its `checkout:` names."""
+    of this repository or recorded for it, counted only in the checkout its
+    `checkout:` names."""
     efforts = []
     if not session_id:
         return efforts
-    for root in worktree_roots(cwd):
-        for path in sorted(root.glob('.scratch/*/effort.md')):
-            try:
-                text = path.read_text(errors='replace')
-            except OSError:
-                continue
-            fields = front_matter(text)
-            checkout = fields.get('checkout', '')
-            if (fields.get('session') == session_id
-                    and checkout and Path(checkout).expanduser().resolve() == root):
-                efforts.append((path, text, fields.get('status')))
+    candidates = [(root, path) for root in worktree_roots(cwd)
+                  for path in sorted(root.glob('.scratch/*/effort.md'))]
+    candidates += [(path.parents[2], path) for path in recorded(session_id)]
+    seen = set()
+    for root, path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        try:
+            text = path.read_text(errors='replace')
+        except OSError:
+            continue
+        fields = front_matter(text)
+        checkout = fields.get('checkout', '')
+        if (fields.get('session') == session_id
+                and checkout and Path(checkout).expanduser().resolve() == root):
+            efforts.append((path, text, fields.get('status')))
     return efforts
 
 
@@ -270,6 +306,7 @@ def new(name):
                   flags=re.MULTILINE)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(set_owner(text, session_id))
+    record(session_id, path)
     ignored = subprocess.run(['git', '-C', str(root), 'check-ignore', '-q', str(path)],
                              capture_output=True, check=False).returncode == 0
     exclude = subprocess.run(['git', '-C', str(root), 'rev-parse', '--path-format=absolute',
@@ -290,6 +327,7 @@ def claim(file):
     session_id = own_session_id()
     path = Path(file).expanduser().resolve()
     path.write_text(set_owner(path.read_text(), session_id))
+    record(session_id, path)
     print(f'{path} is now owned by session {session_id}')
 
 
