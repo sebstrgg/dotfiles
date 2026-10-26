@@ -43,8 +43,10 @@ instructions) is made, checked once on the real target and reported.
   - **Approved**, **Not approved** and **Budget**.
 - Unsettled intent: one round of numbered questions now, while Sebastian is
   here, each with your recommendation, and only the ones where his answer
-  changes the outcome. State the rest as decisions. A new project or big
-  feature with unsettled intent: `grilling`.
+  changes the outcome. Add to that round what you can foresee needing from
+  him later, so he can leave: a new UI's direction (a line per
+  alternative), a spend, a sign-in. State the rest as decisions. A new
+  project or big feature with unsettled intent: `grilling`.
 - Work that will run while Sebastian is away: `unattended` before he leaves.
 
 Playbooks in `~/.agents/skills` (`grilling`, `to-spec`, `to-tickets`,
@@ -114,8 +116,8 @@ finding outside the list goes into the report as a recommendation.
 - Set the effort file to `status: done`; the weekly review removes it.
 - Remove the worktrees, branches, containers and jobs this work created.
 - Report per the global instructions: what is blocked on Sebastian first,
-  then the calls he may overrule, the outcome and evidence (name any
-  substitute check). Open reserved actions go through the question tool.
+  then the calls he may overrule (each decision you made for him, with its
+  reason), the outcome and evidence (name any substitute check). Open reserved actions go through the question tool.
 - After substantial rework, an escaped defect or repeated steering: `retro`,
   and fix the environment (a check, a tool, one rule) rather than add prose.
 
