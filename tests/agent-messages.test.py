@@ -169,6 +169,7 @@ class Digest(unittest.TestCase):
         self.db.execute('INSERT INTO projection_projects VALUES (?, ?, ?, NULL)',
                         ('p1', 'Project', str(self.root)))
         self.thread('t1')
+        self.github = {}
 
     def thread(self, tid, archived=None, deleted=None, **payload):
         self.db.execute('INSERT INTO orchestration_v2_projection_threads VALUES (?, ?, ?, ?, ?, ?)',
@@ -204,7 +205,11 @@ checkout: {checkout or root}
             def now(cls, tz=None):
                 return fixed.astimezone(tz)
 
-        with patch.object(messages, 'datetime', Clock):
+        # GitHub's live view of a pull request stored as open; {} keeps the
+        # snapshot, None is a failed `gh` call.
+        github = lambda url: self.github.get(url, {})
+        with patch.object(messages, 'datetime', Clock), \
+                patch.object(messages, 'github_pull_request', github):
             return messages.digest(self.db, window or self.WINDOW)
 
     def pr(self, state='open', draft=False, merged=None, tid='t1', number=1):
@@ -281,6 +286,21 @@ checkout: {checkout or root}
         self.assertTrue(effort['blockers_section_present'])
         self.assertEqual(next(r['url'] for r in out['waiting_on_sebastian'] if r['type'] == 'pull_request'), url)
         self.assertNotIn('Private body', json.dumps(out))
+
+    def test_open_snapshot_is_checked_against_github(self):
+        merged = self.pr(number=1)
+        self.github[merged] = {'state': 'MERGED', 'isDraft': False,
+                               'mergedAt': '2026-10-25T09:00:00Z', 'title': 'Live title'}
+        unreachable = self.pr(number=2)
+        self.github[unreachable] = None
+        out = self.run_digest()
+        landed = next(r for r in out['landed'] if r['type'] == 'pull_request')
+        self.assertEqual((landed['url'], landed['state_source'], landed['pr_title']),
+                         (merged, 'github', 'Live title'))
+        waiting = [r for r in out['waiting_on_sebastian'] if r['type'] == 'pull_request']
+        self.assertEqual([(r['url'], r['state_source']) for r in waiting], [(unreachable, 'snapshot')])
+        self.assertEqual([e['url'] for e in out['errors'] if e.get('operation') == 'refresh_pull_request'],
+                         [unreachable])
 
     def test_late_milestones_stalled_efforts_and_failed_runs(self):
         extra = '''## Milestones

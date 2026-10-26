@@ -188,10 +188,11 @@ machine. Start a new agent session after installation.
   [`prove-it`](agents/skills/prove-it/SKILL.md) (evidence on the real target)
   and [`unattended`](agents/skills/unattended/SKILL.md) (work while Sebastian
   is away). [`verify`](agents/skills/verify/SKILL.md),
-  [`continue`](agents/skills/continue/SKILL.md) and
-  [`weekly-review`](agents/skills/weekly-review/SKILL.md) are read by path
-  from a brief or a schedule; the weekly review runs on a T3 schedule in the
-  dotfiles project. Matt Pocock's library is installed separately under
+  [`continue`](agents/skills/continue/SKILL.md),
+  [`weekly-review`](agents/skills/weekly-review/SKILL.md) and
+  [`daily-digest`](agents/skills/daily-digest/SKILL.md) are read by path
+  from a brief or a schedule; the weekly review (Mondays 07:00) and the
+  digest (daily 18:00) run on T3 schedules in the dotfiles project. Matt Pocock's library is installed separately under
   `~/.agents/skills`; [`bin/skill-visibility`](bin/skill-visibility) `hide`
   (run by the installer) keeps it from loading on its own, so the agents
   read those playbooks by path when `engineering-workflow` sends them there,

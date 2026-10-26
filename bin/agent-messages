@@ -338,6 +338,16 @@ def digest_time(value):
     return iso_time(value).astimezone(STOCKHOLM).isoformat(timespec='seconds')
 
 
+def github_pull_request(url):
+    """The pull request's live state, title and merge time from GitHub, or None."""
+    try:
+        result = subprocess.run(['gh', 'pr', 'view', url, '--json', 'state,isDraft,mergedAt,title'],
+                                capture_output=True, text=True, timeout=20, check=False)
+        return json.loads(result.stdout) if result.returncode == 0 else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
 def digest_tasks(db, row, gate):
     """The effort-gate t3_task_ended lookup, using our existing read transaction.
 
@@ -504,8 +514,19 @@ def digest(db, window):
         if tid not in threads or not raw:
             continue
         pr = payload(raw, {'thread_id': tid, 'url': url})
+        state_source = 'snapshot'
+        if str(pr.get('state', '')).lower() == 'open':
+            # T3 stops refreshing a pull request once its thread goes quiet, so
+            # an open snapshot is often days old; GitHub has the current state.
+            live = github_pull_request(url)
+            if live is None:
+                errors.append({'thread_id': tid, 'url': url, 'operation': 'refresh_pull_request',
+                               'error': 'gh pr view failed; using the T3 snapshot'})
+            else:
+                pr, state_source = {**pr, **live}, 'github'
         fields = {'type': 'pull_request', **thread_fields(tid), 'url': url,
-                  'pr_title': pr.get('title'), 'snapshot_synced_at': pr.get('syncedAt')}
+                  'pr_title': pr.get('title'), 'state_source': state_source,
+                  'snapshot_synced_at': pr.get('syncedAt')}
         if str(pr.get('state', '')).lower() == 'merged':
             merged = parsed_time(pr.get('mergedAt'), {'thread_id': tid, 'url': url})
             if merged is not None and since <= merged < until:

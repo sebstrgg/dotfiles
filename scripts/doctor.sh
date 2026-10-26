@@ -94,7 +94,7 @@ if [[ -f "$REPO_DIR/agents/global-instructions.md" ]]; then
     check_link "agents/global-instructions.md" "$HOME/.codex/AGENTS.md"
     check_link "agents/global-instructions.md" "$HOME/.claude/CLAUDE.md"
 fi
-for _skill in engineering-workflow delegate ship babysit-pr prove-it unattended verify continue weekly-review; do
+for _skill in engineering-workflow delegate ship babysit-pr prove-it unattended verify continue weekly-review daily-digest; do
     check_link "agents/skills/$_skill" "$HOME/.claude/skills/$_skill"
     check_link "agents/skills/$_skill" "$HOME/.codex/skills/$_skill"
 done

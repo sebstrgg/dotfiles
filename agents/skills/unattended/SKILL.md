@@ -15,12 +15,12 @@ Before he leaves:
    not from hope.
 3. Write `## Milestones` in the effort file: what is true by when (local
    times), judged by commits, merged work and measured results, not by
-   processes being alive.
+   processes being alive. Due is a date and time: the daily digest reads it.
    ```markdown
    | Due (Stockholm) | Milestone | Evidence | State |
    |---|---|---|---|
-   | 02:00 | Ranking change merged and deployed | | open |
-   | 06:00 | Precision measured on the 500-job sample, >= 0.92 | | open |
+   | 2026-10-27 02:00 | Ranking change merged and deployed | | open |
+   | 2026-10-27 06:00 | Precision measured on the 500-job sample, >= 0.92 | | open |
    ```
    State is `open`, `met`, `missed` or `dropped`.
 4. Tell him plainly what will and will not be true when he returns, as a
