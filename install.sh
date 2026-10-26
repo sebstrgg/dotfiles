@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+    printf '%s\n' 'Usage: install.sh (interactive macOS or Ubuntu/WSL2 terminal setup)' 'Agent workflows: https://github.com/sebstrgg/agent-setup' 'FORCE_SETUP=1 reruns optional setup sections.'
+    exit 0
+fi
+
 # ── Dotfiles Installer ────────────────────────────────
 # Bootstraps a macOS or Ubuntu/WSL2 machine with the full terminal environment.
 # Safe to run multiple times — backs up existing configs, never overwrites silently.
@@ -13,12 +18,15 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-info()  { echo -e "  ${BLUE}ℹ${NC} $1"; }
-ok()    { echo -e "  ${GREEN}✓${NC} $1"; }
-warn()  { echo -e "  ${YELLOW}⚠${NC} $1"; }
+info() { echo -e "  ${BLUE}ℹ${NC} $1"; }
+ok() { echo -e "  ${GREEN}✓${NC} $1"; }
+warn() { echo -e "  ${YELLOW}⚠${NC} $1"; }
 error() { echo -e "  ${RED}✗${NC} $1"; }
 
-confirm() { read -rp "$1 [y/N] " _r; [[ "$_r" =~ ^[Yy]$ ]]; }
+confirm() {
+    read -rp "$1 [y/N] " _r
+    [[ "$_r" =~ ^[Yy]$ ]]
+}
 
 # Back up and symlink a file.
 link_config() {
@@ -40,24 +48,11 @@ copy_config() {
     ok "$(basename "$dst") → $dst (copied)"
 }
 
-# Seed a file only if the destination is absent — for app-owned configs (e.g.
-# Claude's settings.json) that the app rewrites atomically and would clobber a
-# symlink with. Never overwrites live state on re-runs.
-seed_config() {
-    local src="$1" dst="$2"
-    mkdir -p "$(dirname "$dst")"
-    if [[ ! -e "$dst" ]]; then
-        cp "$src" "$dst"
-        ok "$(basename "$dst") → $dst (seeded)"
-    else
-        ok "$(basename "$dst") present (untouched — app owns it)"
-    fi
-}
-
 # retry_menu <section-name> <cmd...> — loop cmd until it succeeds.
 # Returns 0 on success, 2 if user skips, exits cleanly on abort.
 retry_menu() {
-    local section="$1"; shift
+    local section="$1"
+    shift
     while ! "$@"; do
         echo ""
         echo -e "  ${RED}✗${NC} ${section} failed."
@@ -99,8 +94,11 @@ section_header() {
 OS="$(uname -s)"
 case "$OS" in
     Darwin) PLATFORM="macos" ;;
-    Linux)  PLATFORM="linux" ;;
-    *)      error "Unsupported OS: $OS"; exit 1 ;;
+    Linux) PLATFORM="linux" ;;
+    *)
+        error "Unsupported OS: $OS"
+        exit 1
+        ;;
 esac
 
 # ── Opening banner ───────────────────────────────────
@@ -122,8 +120,11 @@ if [[ "$PLATFORM" == "macos" ]]; then
     echo "  ────────────────────────────────────────────────────────────"
     read -rp "  Configure as headless Mac mini? [y/N] " _reply
     case "$_reply" in
-        [Yy]*) HEADLESS_MODE=1; ok "Headless Mac mini mode enabled" ;;
-        *)     HEADLESS_MODE=0 ;;
+        [Yy]*)
+            HEADLESS_MODE=1
+            ok "Headless Mac mini mode enabled"
+            ;;
+        *) HEADLESS_MODE=0 ;;
     esac
 fi
 
@@ -135,7 +136,7 @@ if [[ "$PLATFORM" == "macos" ]]; then
         "macOS app preferences (plists, Alfred, LinearMouse)"
         "macOS defaults and hotkeys"
         "Node.js runtime (nvm + LTS)"
-        "Configuration files (symlinks, themes, tmux, Claude Code)"
+        "Configuration files (symlinks, themes, tmux)"
         "GitHub CLI authentication"
         "Bitwarden / Vaultwarden"
         "Atuin history sync"
@@ -146,7 +147,7 @@ else
     SECTION_TITLES=(
         "System packages (apt + cargo rbw + delta + starship + atuin)"
         "Node.js runtime (nvm + LTS)"
-        "Configuration files (symlinks, themes, tmux, Claude Code)"
+        "Configuration files (symlinks, themes, tmux)"
         "Linux services (Docker Engine optional)"
         "GitHub CLI authentication"
         "Bitwarden / Vaultwarden (rbw)"
@@ -159,15 +160,19 @@ fi
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}  Pre-flight — what's about to happen${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-_headless_str="no"; [[ "$HEADLESS_MODE" == "1" ]] && _headless_str="yes"
+_headless_str="no"
+[[ "$HEADLESS_MODE" == "1" ]] && _headless_str="yes"
 echo "  ${TOTAL_STEPS} sections  platform=${PLATFORM}  headless=${_headless_str}"
 for _i in "${!SECTION_TITLES[@]}"; do
-    echo "    $(( _i + 1 )). ${SECTION_TITLES[$_i]}"
+    echo "    $((_i + 1)). ${SECTION_TITLES[$_i]}"
 done
 echo ""
 echo "  FORCE_SETUP=1 ./install.sh to bypass idempotent skips"
 read -rp "  Continue? [Y/n] " _pf_reply
-[[ "${_pf_reply}" =~ ^[Nn] ]] && { info "Aborted. Run ./install.sh when ready."; exit 0; }
+[[ "${_pf_reply}" =~ ^[Nn] ]] && {
+    info "Aborted. Run ./install.sh when ready."
+    exit 0
+}
 
 # ── Step 1: Install packages ─────────────────────────────────────────────────
 if [[ "$PLATFORM" == "macos" ]]; then
@@ -262,8 +267,8 @@ elif [[ "$PLATFORM" == "linux" ]]; then
         else
             if ! command -v cargo &>/dev/null; then
                 info "Installing Rust toolchain (required to build rbw)..."
-                curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-                    | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path
+                curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+                    sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path
                 # shellcheck disable=SC1091
                 [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
                 ok "Rust toolchain installed"
@@ -389,7 +394,7 @@ fi
 # ── Configuration files (macOS = 5, Linux = 3) ───────────────────────────────
 [[ "$PLATFORM" == "macos" ]] && _cfg_step=5 || _cfg_step=3
 section_header "$_cfg_step" "${SECTION_TITLES[$_cfg_step - 1]}" \
-    "Symlinks dotfiles, copies theme files, installs tmux plugins, links Claude Code config." \
+    "Symlinks dotfiles, copies theme files, installs tmux plugins." \
     "Nothing — runs unattended. Backs up any existing non-symlink files." \
     "n/a — always runs (idempotent)."
 
@@ -406,7 +411,7 @@ if [[ -f "$HOME/.zshrc" && ! -L "$HOME/.zshrc" && ! -f "$HOME/.zshrc.local" ]]; 
             /^# bun/ || /^export BUN_INSTALL/  { p=1 }
             /^# Entire CLI/                    { p=1 }
             p { print }
-        ' "$HOME/.zshrc" > "$HOME/.zshrc.local"
+        ' "$HOME/.zshrc" >"$HOME/.zshrc.local"
         ok "Seeded ~/.zshrc.local from existing rc"
     fi
 fi
@@ -415,22 +420,22 @@ fi
 
 # Keep the repair tool executable (git usually preserves the bit, but be safe).
 [[ -f "$SCRIPT_DIR/scripts/doctor.sh" ]] && chmod +x "$SCRIPT_DIR/scripts/doctor.sh"
-link_config "$SCRIPT_DIR/tmux/tmux.conf"         "$HOME/.tmux.conf"
-link_config "$SCRIPT_DIR/starship/starship.toml"  "$HOME/.config/starship.toml"
-link_config "$SCRIPT_DIR/zsh/.zshrc"              "$HOME/.zshrc"
-link_config "$SCRIPT_DIR/git/.gitconfig"          "$HOME/.gitconfig"
-link_config "$SCRIPT_DIR/bat/config"              "$HOME/.config/bat/config"
-link_config "$SCRIPT_DIR/nano/.nanorc"            "$HOME/.nanorc"
-link_config "$SCRIPT_DIR/vim/.vimrc"              "$HOME/.vimrc"
+link_config "$SCRIPT_DIR/tmux/tmux.conf" "$HOME/.tmux.conf"
+link_config "$SCRIPT_DIR/starship/starship.toml" "$HOME/.config/starship.toml"
+link_config "$SCRIPT_DIR/zsh/.zshrc" "$HOME/.zshrc"
+link_config "$SCRIPT_DIR/git/.gitconfig" "$HOME/.gitconfig"
+link_config "$SCRIPT_DIR/bat/config" "$HOME/.config/bat/config"
+link_config "$SCRIPT_DIR/nano/.nanorc" "$HOME/.nanorc"
+link_config "$SCRIPT_DIR/vim/.vimrc" "$HOME/.vimrc"
 # atuin/config.toml is NOT symlinked here — setup_atuin() writes it via sed+mv substitution
 [[ "$PLATFORM" == "macos" ]] && link_config "$SCRIPT_DIR/ghostty/config" "$HOME/.config/ghostty/config"
 
 info "Installing Catppuccin themes..."
 copy_config "$SCRIPT_DIR/bat/themes/Catppuccin Mocha.tmTheme" "$HOME/.config/bat/themes/Catppuccin Mocha.tmTheme"
-copy_config "$SCRIPT_DIR/git/catppuccin.gitconfig"             "$HOME/.config/git/catppuccin.gitconfig"
+copy_config "$SCRIPT_DIR/git/catppuccin.gitconfig" "$HOME/.config/git/catppuccin.gitconfig"
 mkdir -p "$HOME/.config/zsh"
 copy_config "$SCRIPT_DIR/zsh-syntax-highlighting/catppuccin_mocha-zsh-syntax-highlighting.zsh" \
-            "$HOME/.config/zsh/catppuccin_mocha-zsh-syntax-highlighting.zsh"
+    "$HOME/.config/zsh/catppuccin_mocha-zsh-syntax-highlighting.zsh"
 
 if command -v bat &>/dev/null; then
     bat cache --build &>/dev/null && ok "bat themes cached"
@@ -440,7 +445,7 @@ fi
 
 info "Setting up tmux..."
 mkdir -p "$HOME/.tmux"
-cp "$SCRIPT_DIR/tmux/cheatsheet.sh"  "$HOME/.tmux/cheatsheet.sh"  && chmod +x "$HOME/.tmux/cheatsheet.sh"
+cp "$SCRIPT_DIR/tmux/cheatsheet.sh" "$HOME/.tmux/cheatsheet.sh" && chmod +x "$HOME/.tmux/cheatsheet.sh"
 cp "$SCRIPT_DIR/tmux/session-dev.sh" "$HOME/.tmux/session-dev.sh" && chmod +x "$HOME/.tmux/session-dev.sh"
 ok "tmux scripts installed"
 TPM_DIR="$HOME/.tmux/plugins/tpm"
@@ -452,46 +457,7 @@ else
     ok "TPM installed"
 fi
 
-info "Setting up Claude Code configuration..."
-# settings.json is SEEDED, never symlinked: Claude Code rewrites it atomically
-# (write-to-temp + rename), which silently replaces a symlink with a regular
-# file — so linking it guarantees drift. Seed the baseline; let Claude own it.
-seed_config "$SCRIPT_DIR/claude/settings.json" "$HOME/.claude/settings.json"
-link_config "$SCRIPT_DIR/claude/statusline.sh" "$HOME/.claude/statusline.sh"
-chmod +x "$HOME/.claude/statusline.sh"
-ok "Claude Code config linked"
-
-# Share workflow skills across local coding agents.
-mkdir -p "$HOME/.claude/skills" "$HOME/.codex/skills"
-for skill in engineering-workflow delegate ship babysit-pr prove-it unattended verify continue weekly-review daily-digest; do
-    link_config "$SCRIPT_DIR/agents/skills/$skill" "$HOME/.claude/skills/$skill"
-    link_config "$SCRIPT_DIR/agents/skills/$skill" "$HOME/.codex/skills/$skill"
-done
-# Drop links to skills this repository no longer has.
-for link in "$HOME"/.claude/skills/* "$HOME"/.codex/skills/*; do
-    if [[ -L "$link" && ! -e "$link" && "$(readlink "$link")" == "$SCRIPT_DIR/agents/skills/"* ]]; then
-        rm "$link"
-    fi
-done
-# Only the allowlisted skills load on their own; the rest stay callable by name.
-python3 "$SCRIPT_DIR/bin/skill-visibility" hide
-# The shared policy is private (gitignored); a public clone has no copy to link.
-if [[ -f "$SCRIPT_DIR/agents/global-instructions.md" ]]; then
-    link_config "$SCRIPT_DIR/agents/global-instructions.md" "$HOME/.codex/AGENTS.md"
-    link_config "$SCRIPT_DIR/agents/global-instructions.md" "$HOME/.claude/CLAUDE.md"
-else
-    warn "Private policy absent: restore agents/global-instructions.md, then re-run"
-fi
-# Codex hooks (effort gate, force-push tripwire) and tripwire rules. New hooks need trusting once in
-# Codex via /hooks. The rules file is copied: Codex skips symlinked .rules files,
-# and writes its own approvals to rules/default.rules.
-mkdir -p "$HOME/.codex/rules"
-link_config "$SCRIPT_DIR/codex/hooks.json" "$HOME/.codex/hooks.json"
-/bin/cp -f "$SCRIPT_DIR/codex/rules/tripwires.rules" "$HOME/.codex/rules/tripwires.rules"
-ok "Codex tripwire rules copied"
-
-# Launch agents: Claude usage-window keeper, development disk trim, and
-# Bitwarden bridge expiry. Copied, not symlinked: launchd does not reliably
+# Launch agents: development disk trim and Bitwarden bridge expiry. Copied, not symlinked: launchd does not reliably
 # load symlinked agents.
 if [[ "$PLATFORM" == "macos" ]]; then
     for _src in "$SCRIPT_DIR"/launchd/*.plist; do
@@ -517,8 +483,8 @@ if [[ "$PLATFORM" == "linux" ]]; then
             sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
             sudo chmod a+r /etc/apt/keyrings/docker.asc
             # shellcheck disable=SC1091  # /etc/os-release is runtime-only, not a checked input
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-                sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" |
+                sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
             sudo apt-get update -qq
             sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
             sudo usermod -aG docker "$USER"
@@ -556,7 +522,8 @@ if command -v gh &>/dev/null; then
         fi
     fi
 else
-    warn "gh not found — skipping"; SKIPPED_GH=1
+    warn "gh not found — skipping"
+    SKIPPED_GH=1
 fi
 
 # ── Bitwarden / Vaultwarden (macOS = 7, Linux = 6) ───────────────────────────
@@ -566,22 +533,31 @@ fi
 setup_bw() {
     [[ "$PLATFORM" == "macos" ]] || return 0
     command -v bw >/dev/null 2>&1 || return 0
-    command -v jq >/dev/null 2>&1 || { warn "jq missing — bw setup skipped"; return 0; }
+    command -v jq >/dev/null 2>&1 || {
+        warn "jq missing — bw setup skipped"
+        return 0
+    }
 
     local bw_status
     bw_status=$(bw status 2>/dev/null | jq -r '.status' 2>/dev/null || echo "unknown")
     if [[ "$bw_status" == "unlocked" && -n "${BW_SESSION:-}" && -z "${FORCE_SETUP:-}" ]]; then
-        ok "bw already unlocked"; return 0
+        ok "bw already unlocked"
+        return 0
     fi
 
     read -rp "  Configure bw now? [Y/n] " _yn
-    [[ "$_yn" =~ ^[Nn]$ ]] && { warn "Skipped bw setup."; SKIPPED_BW=1; return 0; }
+    [[ "$_yn" =~ ^[Nn]$ ]] && {
+        warn "Skipped bw setup."
+        SKIPPED_BW=1
+        return 0
+    }
 
     local env_file="$HOME/.config/dotfiles/local.env" vw_url="" vw_email=""
     if [[ -f "$env_file" ]]; then
         # shellcheck disable=SC1090
         source "$env_file"
-        vw_url="${VAULTWARDEN_URL:-}"; vw_email="${VAULTWARDEN_EMAIL:-}"
+        vw_url="${VAULTWARDEN_URL:-}"
+        vw_email="${VAULTWARDEN_EMAIL:-}"
     fi
     if [[ -z "$vw_url" ]]; then
         echo "  [1] Self-hosted Vaultwarden (enter URL)"
@@ -590,7 +566,11 @@ setup_bw() {
         case "$_choice" in
             1) read -rp "  Vaultwarden server URL: " vw_url ;;
             2) vw_url="https://vault.bitwarden.com" ;;
-            *) warn "Invalid choice — skipping bw setup"; SKIPPED_BW=1; return 0 ;;
+            *)
+                warn "Invalid choice — skipping bw setup"
+                SKIPPED_BW=1
+                return 0
+                ;;
         esac
     else
         ok "Using cached Vaultwarden URL: $vw_url"
@@ -600,15 +580,19 @@ setup_bw() {
     bw config server "$vw_url" >/dev/null
     ok "bw server configured: $vw_url"
     mkdir -p "$(dirname "$env_file")"
-    { grep -v '^VAULTWARDEN_' "$env_file" 2>/dev/null || true
-      echo "VAULTWARDEN_URL=$vw_url"
-      echo "VAULTWARDEN_EMAIL=$vw_email"; } > "$env_file.tmp" && mv "$env_file.tmp" "$env_file"
+    {
+        grep -v '^VAULTWARDEN_' "$env_file" 2>/dev/null || true
+        echo "VAULTWARDEN_URL=$vw_url"
+        echo "VAULTWARDEN_EMAIL=$vw_email"
+    } >"$env_file.tmp" && mv "$env_file.tmp" "$env_file"
 
     bw_status=$(bw status 2>/dev/null | jq -r '.status' 2>/dev/null || echo "unknown")
     if [[ "$bw_status" == "unauthenticated" ]]; then
         info "Logging in as $vw_email..."
         if ! retry_menu "bw login" bw login "$vw_email"; then
-            warn "bw login skipped — retry later with: bw login"; SKIPPED_BW=1; return 0
+            warn "bw login skipped — retry later with: bw login"
+            SKIPPED_BW=1
+            return 0
         fi
     fi
 
@@ -618,7 +602,8 @@ setup_bw() {
     # capture the session token. retry_menu can't capture stdout from its command.
     if ! _session=$(bw unlock --raw 2>/dev/null); then
         warn "bw unlock failed — retry manually: export BW_SESSION=\$(bw unlock --raw)"
-        SKIPPED_BW=1; return 0
+        SKIPPED_BW=1
+        return 0
     fi
     export BW_SESSION="$_session"
     bw sync >/dev/null 2>&1 || true
@@ -641,19 +626,22 @@ setup_rbw() {
         fi
         return 0
     fi
-    [[ -n "${FORCE_SETUP:-}" && -n "$existing_email" ]] && \
+    [[ -n "${FORCE_SETUP:-}" && -n "$existing_email" ]] &&
         info "FORCE_SETUP=1 — re-running rbw setup despite existing config"
 
     read -rp "  Configure rbw now? [Y/n] " _yn
     if [[ "$_yn" =~ ^[Nn]$ ]]; then
-        warn "Skipped rbw setup."; SKIPPED_BW=1; return 0
+        warn "Skipped rbw setup."
+        SKIPPED_BW=1
+        return 0
     fi
 
     local env_file="$HOME/.config/dotfiles/local.env" vaultwarden_url="" vaultwarden_email=""
     if [[ -f "$env_file" ]]; then
         # shellcheck disable=SC1090
         source "$env_file"
-        vaultwarden_url="${VAULTWARDEN_URL:-}"; vaultwarden_email="${VAULTWARDEN_EMAIL:-}"
+        vaultwarden_url="${VAULTWARDEN_URL:-}"
+        vaultwarden_email="${VAULTWARDEN_EMAIL:-}"
     fi
     if [[ -z "$vaultwarden_url" ]]; then
         echo "  [1] Self-hosted Vaultwarden (enter URL)"
@@ -662,7 +650,11 @@ setup_rbw() {
         case "$_choice" in
             1) read -rp "  Vaultwarden server URL: " vaultwarden_url ;;
             2) vaultwarden_url="https://vault.bitwarden.com" ;;
-            *) warn "Invalid choice — skipping rbw setup"; SKIPPED_BW=1; return 0 ;;
+            *)
+                warn "Invalid choice — skipping rbw setup"
+                SKIPPED_BW=1
+                return 0
+                ;;
         esac
     else
         ok "Using cached Vaultwarden URL: $vaultwarden_url"
@@ -675,9 +667,11 @@ setup_rbw() {
     ok "rbw config written"
 
     mkdir -p "$(dirname "$env_file")"
-    { grep -v '^VAULTWARDEN_' "$env_file" 2>/dev/null || true
-      echo "VAULTWARDEN_URL=$vaultwarden_url"
-      echo "VAULTWARDEN_EMAIL=$vaultwarden_email"; } > "$env_file.tmp" && mv "$env_file.tmp" "$env_file"
+    {
+        grep -v '^VAULTWARDEN_' "$env_file" 2>/dev/null || true
+        echo "VAULTWARDEN_URL=$vaultwarden_url"
+        echo "VAULTWARDEN_EMAIL=$vaultwarden_email"
+    } >"$env_file.tmp" && mv "$env_file.tmp" "$env_file"
 
     info "Logging in to $vaultwarden_url — pinentry will prompt for master password..."
     if retry_menu "rbw login" rbw login; then
@@ -685,7 +679,8 @@ setup_rbw() {
         retry_menu "rbw unlock" rbw unlock && ok "rbw unlocked"
         rbw sync 2>/dev/null || true
     else
-        warn "rbw login skipped — retry later with: rbw login"; SKIPPED_BW=1
+        warn "rbw login skipped — retry later with: rbw login"
+        SKIPPED_BW=1
     fi
 }
 
@@ -695,8 +690,8 @@ section_header "$_bw_step" "${SECTION_TITLES[$_bw_step - 1]}" \
     "Already unlocked, or prefer to set up vault credentials manually."
 
 SKIPPED_BW=0
-setup_rbw   # no-op on Mac (PLATFORM check + no rbw binary)
-setup_bw    # no-op on Linux (PLATFORM check)
+setup_rbw # no-op on Mac (PLATFORM check + no rbw binary)
+setup_bw  # no-op on Linux (PLATFORM check)
 
 # ── Atuin history sync (macOS = 8, Linux = 7) ────────────────────────────────
 [[ "$PLATFORM" == "macos" ]] && _atuin_step=8 || _atuin_step=7
@@ -710,7 +705,8 @@ setup_atuin() {
 
     if atuin status 2>/dev/null | grep -qE 'Logged in|Username:'; then
         if [[ -z "${FORCE_SETUP:-}" ]]; then
-            ok "Atuin already configured"; return 0
+            ok "Atuin already configured"
+            return 0
         fi
         info "FORCE_SETUP=1 — re-running Atuin setup despite existing login"
     fi
@@ -722,10 +718,18 @@ setup_atuin() {
     case "${_atuin_server_choice}" in
         1)
             read -rp "  Atuin server URL (e.g. https://atuin.example.com): " atuin_url
-            [[ -z "$atuin_url" ]] && { warn "No URL entered — skipping Atuin setup"; SKIPPED_ATUIN=1; return 0; }
+            [[ -z "$atuin_url" ]] && {
+                warn "No URL entered — skipping Atuin setup"
+                SKIPPED_ATUIN=1
+                return 0
+            }
             ;;
         2) atuin_url="https://api.atuin.sh" ;;
-        *) warn "Skipped Atuin setup. Run 'atuin register' or 'atuin login' manually."; SKIPPED_ATUIN=1; return 0 ;;
+        *)
+            warn "Skipped Atuin setup. Run 'atuin register' or 'atuin login' manually."
+            SKIPPED_ATUIN=1
+            return 0
+            ;;
     esac
 
     # Write URL into atuin config.
@@ -741,16 +745,17 @@ setup_atuin() {
     fi
     local _atuin_tmp
     _atuin_tmp=$(mktemp "$HOME/.config/atuin/config.toml.XXXXXX")
-    sed "s|{{ATUIN_SYNC_ADDRESS}}|$atuin_url|g" "$SCRIPT_DIR/atuin/config.toml" > "$_atuin_tmp"
+    sed "s|{{ATUIN_SYNC_ADDRESS}}|$atuin_url|g" "$SCRIPT_DIR/atuin/config.toml" >"$_atuin_tmp"
     if [[ ! -s "$_atuin_tmp" ]]; then
         warn "Generated atuin config is empty — template at $SCRIPT_DIR/atuin/config.toml may be corrupted"
-        rm -f "$_atuin_tmp"; return 1
+        rm -f "$_atuin_tmp"
+        return 1
     fi
     mv -f "$_atuin_tmp" "$_atuin_dest"
     ok "Atuin config written with server: $atuin_url"
 
     mkdir -p "$HOME/.config/dotfiles"
-    echo "ATUIN_SYNC_ADDRESS=$atuin_url" >> "$HOME/.config/dotfiles/local.env"
+    echo "ATUIN_SYNC_ADDRESS=$atuin_url" >>"$HOME/.config/dotfiles/local.env"
     # Pull stored creds: new shape (notes=key), legacy fallback (atuin-key item).
     _pull_atuin_creds() {
         if [[ "$PLATFORM" == "macos" ]] && command -v bw >/dev/null 2>&1 && [[ -n "${BW_SESSION:-}" ]]; then
@@ -777,12 +782,14 @@ setup_atuin() {
             # Guard: check for existing vault item — duplicates make 'bw get' fail.
             local _vault_exists=0
             if [[ "$PLATFORM" == "macos" ]] && command -v bw >/dev/null 2>&1 && [[ -n "${BW_SESSION:-}" ]]; then
-                bw sync >/dev/null 2>&1 || true; bw get item atuin &>/dev/null && _vault_exists=1
+                bw sync >/dev/null 2>&1 || true
+                bw get item atuin &>/dev/null && _vault_exists=1
             elif command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
-                rbw sync 2>/dev/null || true; rbw get atuin &>/dev/null && _vault_exists=1
+                rbw sync 2>/dev/null || true
+                rbw get atuin &>/dev/null && _vault_exists=1
             fi
 
-            if (( _vault_exists )); then
+            if ((_vault_exists)); then
                 warn "Vault already contains an 'atuin' item."
                 printf '  What next?\n    [1] Overwrite    (delete existing, create fresh)\n    [2] Use existing (skip create; log in with stored creds)\n    [3] Abort\n'
                 local _dedup_choice
@@ -791,10 +798,15 @@ setup_atuin() {
                     1)
                         info "Deleting existing 'atuin' vault item..."
                         if [[ "$PLATFORM" == "macos" ]] && [[ -n "${BW_SESSION:-}" ]]; then
-                            local _del_id; _del_id=$(bw get item atuin 2>/dev/null | jq -r '.id' || true)
-                            if [[ -n "$_del_id" ]]; then bw delete item "$_del_id" >/dev/null 2>&1 || true; bw sync >/dev/null 2>&1 || true; fi
+                            local _del_id
+                            _del_id=$(bw get item atuin 2>/dev/null | jq -r '.id' || true)
+                            if [[ -n "$_del_id" ]]; then
+                                bw delete item "$_del_id" >/dev/null 2>&1 || true
+                                bw sync >/dev/null 2>&1 || true
+                            fi
                         else
-                            rbw remove atuin 2>/dev/null || true; rbw sync 2>/dev/null || true
+                            rbw remove atuin 2>/dev/null || true
+                            rbw sync 2>/dev/null || true
                         fi
                         ;;
                     2)
@@ -803,11 +815,14 @@ setup_atuin() {
                         if [[ -z "$_u" || -z "$_p" || -z "$_k" ]]; then
                             warn "Vault pull failed — enter credentials manually."
                             read -rp "  Username: " _u
-                            read -rsp "  Password: " _p; echo
-                            read -rsp "  Encryption key: " _k; echo
+                            read -rsp "  Password: " _p
+                            echo
+                            read -rsp "  Encryption key: " _k
+                            echo
                         fi
                         retry_menu "atuin login" atuin login -u "$_u" -p "$_p" -k "$_k"
-                        atuin import auto 2>/dev/null || true; atuin sync 2>/dev/null || true
+                        atuin import auto 2>/dev/null || true
+                        atuin sync 2>/dev/null || true
                         return 0
                         ;;
                     *) abort_clean "User aborted at: Atuin vault dedup" ;;
@@ -815,9 +830,11 @@ setup_atuin() {
             fi
 
             # Generate password locally — avoids rbw generate creating a duplicate entry.
-            local _p; _p=$(openssl rand -base64 40 | tr -d '/+=\n' | head -c 40)
+            local _p
+            _p=$(openssl rand -base64 40 | tr -d '/+=\n' | head -c 40)
             retry_menu "atuin register" atuin register -u "$_u" -e "$_e" -p "$_p"
-            local _key; _key=$(atuin key)
+            local _key
+            _key=$(atuin key)
             # Store username + password + key in ONE vault item; key in notes field.
             if [[ "$PLATFORM" == "macos" ]] && command -v bw >/dev/null 2>&1 && [[ -n "${BW_SESSION:-}" ]]; then
                 local _item_json
@@ -825,34 +842,41 @@ setup_atuin() {
                     --arg n "atuin" --arg u "$_u" --arg p "$_p" --arg k "$_key" \
                     '.name=$n | .type=1 | .login.username=$u | .login.password=$p | .login.uris=[] | .notes=$k')
                 if echo "$_item_json" | bw encode | bw create item >/dev/null 2>&1; then
-                    bw sync >/dev/null 2>&1 || true; ok "atuin stored in vault (username + password + key in notes)"
+                    bw sync >/dev/null 2>&1 || true
+                    ok "atuin stored in vault (username + password + key in notes)"
                 else
                     warn "Couldn't store atuin item — save these manually:"
-                    echo "  Password:        $_p"; echo "  Encryption key:  $_key"
+                    echo "  Password:        $_p"
+                    echo "  Encryption key:  $_key"
                     read -rp "  Press enter when saved somewhere safe: " _
                 fi
             elif command -v rbw >/dev/null 2>&1 && rbw unlocked &>/dev/null; then
-                        # rbw add: first line = password, blank line separator, rest = notes.
-                local _rbw_editor; _rbw_editor=$(mktemp)
-                cat > "$_rbw_editor" <<'EOSCRIPT'
+                # rbw add: first line = password, blank line separator, rest = notes.
+                local _rbw_editor
+                _rbw_editor=$(mktemp)
+                cat >"$_rbw_editor" <<'EOSCRIPT'
 #!/bin/sh
 printf '%s\n\n%s\n' "$RBW_PW" "$RBW_KEY" > "$1"
 EOSCRIPT
                 chmod +x "$_rbw_editor"
                 if RBW_PW="$_p" RBW_KEY="$_key" EDITOR="$_rbw_editor" rbw add --username "$_u" atuin 2>/dev/null; then
-                    rbw sync 2>/dev/null || true; ok "atuin stored in vault (username + password + key in notes)"
+                    rbw sync 2>/dev/null || true
+                    ok "atuin stored in vault (username + password + key in notes)"
                 else
                     warn "Couldn't store atuin item — save these manually:"
-                    echo "  Password:        $_p"; echo "  Encryption key:  $_key"
+                    echo "  Password:        $_p"
+                    echo "  Encryption key:  $_key"
                     read -rp "  Press enter when saved somewhere safe: " _
                 fi
                 rm -f "$_rbw_editor"
             else
                 warn "Vault not available — save these manually:"
-                echo "  Password:        $_p"; echo "  Encryption key:  $_key"
+                echo "  Password:        $_p"
+                echo "  Encryption key:  $_key"
                 read -rp "  Press enter when saved somewhere safe: " _
             fi
-            atuin import auto 2>/dev/null || true; atuin sync 2>/dev/null || true
+            atuin import auto 2>/dev/null || true
+            atuin sync 2>/dev/null || true
             ;;
         2)
             info "Pulling Atuin credentials from vault..."
@@ -862,24 +886,42 @@ EOSCRIPT
             if [[ -z "$_u" || -z "$_p" || -z "$_k" ]]; then
                 warn "Auto-pull from vault failed — enter manually."
                 if [[ "$PLATFORM" == "macos" ]] && [[ -n "${BW_SESSION:-}" ]]; then
-                    [[ -z "$_u" ]] && { echo "  username:"; bw get username atuin 2>&1 | sed 's/^/    /' || true; }
-                    [[ -z "$_p" ]] && { echo "  password:"; bw get password atuin 2>&1 | sed 's/^/    /' || true; }
+                    [[ -z "$_u" ]] && {
+                        echo "  username:"
+                        bw get username atuin 2>&1 | sed 's/^/    /' || true
+                    }
+                    [[ -z "$_p" ]] && {
+                        echo "  password:"
+                        bw get password atuin 2>&1 | sed 's/^/    /' || true
+                    }
                     [[ -z "$_k" ]] && echo "  notes (new) / atuin-key (legacy): both empty"
                 elif command -v rbw >/dev/null 2>&1; then
-                    [[ -z "$_u" ]] && { echo "  username:"; rbw get --field username atuin 2>&1 | sed 's/^/    /' || true; }
-                    [[ -z "$_p" ]] && { echo "  password:"; rbw get atuin 2>&1 | sed 's/^/    /' || true; }
+                    [[ -z "$_u" ]] && {
+                        echo "  username:"
+                        rbw get --field username atuin 2>&1 | sed 's/^/    /' || true
+                    }
+                    [[ -z "$_p" ]] && {
+                        echo "  password:"
+                        rbw get atuin 2>&1 | sed 's/^/    /' || true
+                    }
                     [[ -z "$_k" ]] && echo "  notes (new) / atuin-key (legacy): both empty"
                 fi
                 read -rp "  Username: " _u
-                read -rsp "  Password: " _p; echo
-                read -rsp "  Encryption key: " _k; echo
+                read -rsp "  Password: " _p
+                echo
+                read -rsp "  Encryption key: " _k
+                echo
             else
                 ok "Retrieved atuin credentials from vault ($_u)"
             fi
             retry_menu "atuin login" atuin login -u "$_u" -p "$_p" -k "$_k"
-            atuin import auto 2>/dev/null || true; atuin sync 2>/dev/null || true
+            atuin import auto 2>/dev/null || true
+            atuin sync 2>/dev/null || true
             ;;
-        *) warn "Skipped Atuin auth. Run 'atuin register' or 'atuin login' manually."; SKIPPED_ATUIN=1 ;;
+        *)
+            warn "Skipped Atuin auth. Run 'atuin register' or 'atuin login' manually."
+            SKIPPED_ATUIN=1
+            ;;
     esac
 }
 
@@ -896,51 +938,61 @@ section_header "$_pf_step" "${SECTION_TITLES[$_pf_step - 1]}" \
 _pf_failures=0
 _chk() {
     # _chk <label> <severity:ok|warn|fail> <test-cmd...>
-    local label="$1" sev="$2"; shift 2
+    local label="$1" sev="$2"
+    shift 2
     if "$@" &>/dev/null; then
         echo -e "  ${GREEN}✓${NC} ${label}"
     else
         case "$sev" in
             warn) echo -e "  ${YELLOW}⚠${NC} ${label}" ;;
-            fail) echo -e "  ${RED}✗${NC} ${label}"; (( _pf_failures++ )) || true ;;
+            fail)
+                echo -e "  ${RED}✗${NC} ${label}"
+                ((_pf_failures++)) || true
+                ;;
         esac
     fi
 }
 
 info "Checking symlinks..."
-_chk "$HOME/.zshrc"              fail test -L "$HOME/.zshrc"
-_chk "$HOME/.tmux.conf"          fail test -L "$HOME/.tmux.conf"
-_chk "$HOME/.gitconfig"          fail test -L "$HOME/.gitconfig"
+_chk "$HOME/.zshrc" fail test -L "$HOME/.zshrc"
+_chk "$HOME/.tmux.conf" fail test -L "$HOME/.tmux.conf"
+_chk "$HOME/.gitconfig" fail test -L "$HOME/.gitconfig"
 _chk "$HOME/.config/starship.toml" fail test -L "$HOME/.config/starship.toml"
 info "Checking commands on PATH..."
-_chk "atuin"    fail command -v atuin
+_chk "atuin" fail command -v atuin
 _chk "starship" fail command -v starship
-_chk "delta"    fail command -v delta
-_chk "gh"       fail command -v gh
-_chk "nvm dir"  fail test -d "$HOME/.nvm"
-if [[ "$PLATFORM" == "macos" ]]; then _chk "bw"  warn command -v bw
-else                                   _chk "rbw" warn command -v rbw; fi
+_chk "delta" fail command -v delta
+_chk "gh" fail command -v gh
+_chk "nvm dir" fail test -d "$HOME/.nvm"
+if [[ "$PLATFORM" == "macos" ]]; then
+    _chk "bw" warn command -v bw
+else _chk "rbw" warn command -v rbw; fi
 info "Checking service state..."
 _chk "gh auth status" warn gh auth status
 if [[ "$PLATFORM" == "macos" ]]; then
     _bw_st=$(bw status 2>/dev/null | jq -r '.status' 2>/dev/null || echo "unknown")
-    if [[ "$_bw_st" == "unlocked" ]]; then echo -e "  ${GREEN}✓${NC} bw vault unlocked"
-    elif [[ "$SKIPPED_BW" == "1" ]];  then echo -e "  ${YELLOW}⚠${NC} bw vault — skipped by user"
+    if [[ "$_bw_st" == "unlocked" ]]; then
+        echo -e "  ${GREEN}✓${NC} bw vault unlocked"
+    elif [[ "$SKIPPED_BW" == "1" ]]; then
+        echo -e "  ${YELLOW}⚠${NC} bw vault — skipped by user"
     else echo -e "  ${YELLOW}⚠${NC} bw vault locked (run: export BW_SESSION=\$(bw unlock --raw))"; fi
 else
-    if rbw unlocked &>/dev/null;      then echo -e "  ${GREEN}✓${NC} rbw vault unlocked"
-    elif [[ "$SKIPPED_BW" == "1" ]];  then echo -e "  ${YELLOW}⚠${NC} rbw vault — skipped by user"
+    if rbw unlocked &>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} rbw vault unlocked"
+    elif [[ "$SKIPPED_BW" == "1" ]]; then
+        echo -e "  ${YELLOW}⚠${NC} rbw vault — skipped by user"
     else echo -e "  ${YELLOW}⚠${NC} rbw vault locked (run: rbw unlock)"; fi
 fi
-if [[ "$SKIPPED_ATUIN" == "1" ]]; then echo -e "  ${YELLOW}⚠${NC} atuin — skipped by user"
+if [[ "$SKIPPED_ATUIN" == "1" ]]; then
+    echo -e "  ${YELLOW}⚠${NC} atuin — skipped by user"
 else _chk "atuin status" warn atuin status; fi
 
 info "Checking vault items..."
 if [[ "$PLATFORM" == "macos" ]] && [[ -n "${BW_SESSION:-}" ]]; then
-    _chk "vault item 'atuin' (username)"  warn bw get username atuin
+    _chk "vault item 'atuin' (username)" warn bw get username atuin
     _chk "vault item 'atuin' (notes/key)" warn bw get notes atuin
 elif command -v rbw &>/dev/null && rbw unlocked &>/dev/null; then
-    _chk "vault item 'atuin'"       warn rbw get atuin
+    _chk "vault item 'atuin'" warn rbw get atuin
     _chk "vault item 'atuin' notes" warn rbw get --field notes atuin
 else
     echo -e "  ${YELLOW}⚠${NC} vault items — vault not unlocked, skipping check"
@@ -960,7 +1012,7 @@ if [[ "$PLATFORM" == "macos" ]]; then
 fi
 
 # ── Validation result ──────────────────────────────
-if (( _pf_failures > 0 )); then
+if ((_pf_failures > 0)); then
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${RED}  Post-flight: ${_pf_failures} hard failure(s) detected${NC}"
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -980,15 +1032,14 @@ echo "  Multiplexer  tmux + Catppuccin + vim keys"
 echo "  Prompt       Starship Catppuccin palette"
 echo "  Shell        zsh + autosuggestions + syntax highlighting"
 echo "  Tools        bat eza delta zoxide nano vim"
-echo "  Claude       Config, statusline, plugins"
 if [[ "$PLATFORM" == "macos" ]]; then
-echo "  Terminal     Ghostty with Catppuccin Mocha"
+    echo "  Terminal     Ghostty with Catppuccin Mocha"
 fi
 echo "  Re-run prompts: FORCE_SETUP=1 ./install.sh   Runbook: docs/bitwarden-rbw-setup.md"
 echo "  Repair/drift check anytime: dots-doctor  (or scripts/doctor.sh --fix)"
 echo ""
 if [[ "$PLATFORM" == "macos" ]] && [[ "$HEADLESS_MODE" == "1" ]]; then
-echo -e "  ${YELLOW}⚠${NC} Plug in an HDMI dummy plug (~\$5) for crisp 4K Screen Sharing."
+    echo -e "  ${YELLOW}⚠${NC} Plug in an HDMI dummy plug (~\$5) for crisp 4K Screen Sharing."
 fi
 echo ""
 echo "  Next steps:"

@@ -1,5 +1,0 @@
-interface:
-  display_name: "Daily digest"
-  short_description: "What landed, what waits on Sebastian, what is late"
-policy:
-  allow_implicit_invocation: false

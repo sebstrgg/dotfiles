@@ -21,9 +21,5 @@ docs/*
 *.bak-pre-*
 *.bak-*
 
-# personal global instructions — deliberately NOT published
-claude/CLAUDE.md
-agents/global-instructions.md
-
 # Agent working state (effort files, drafts) — never published
 .scratch/

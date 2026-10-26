@@ -149,9 +149,8 @@ dotfiles/
 
 ## Repair & Drift Check
 
-Configs are symlinked from this repo into your home directory. Apps that rewrite
-their own config atomically (Claude Code's `settings.json`) are **seeded**
-(copied) instead, since they'd break a symlink. Two commands keep things healthy:
+Configs are symlinked from this repo into your home directory; theme files
+are copied. Two commands keep things healthy:
 
 ```bash
 dots-doctor          # check symlinks, PATH, portability — exits non-zero on drift
@@ -167,79 +166,7 @@ Installer-managed blocks (bun, shell completions, etc.) live in
 append to your rc from corrupting the committed file.
 The first install seeds it from `zsh/.zshrc.local.example`; edit it freely.
 
-## Global agent workflows
-
-These integrations are user-wide for Claude Code and Codex on the configured
-machine. Start a new agent session after installation.
-
-- **Policy.** `agents/global-instructions.md` is private (gitignored) and is
-  linked as `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. A public clone has
-  no copy; the installer warns and skips it.
-- **Skills**, linked into both runtimes. Six load on their own, each
-  description naming the situation and the phrases that should trigger it:
-  [`engineering-workflow`](agents/skills/engineering-workflow/SKILL.md) (the
-  path from request to verified result, routing to the rest),
-  [`delegate`](agents/skills/delegate/SKILL.md) (child agents through T3's
-  `delegate_task`, the review loop, verification),
-  [`ship`](agents/skills/ship/SKILL.md) (pull request, merge gate, merge and
-  deploy, or a hand-over at ready-to-merge),
-  [`babysit-pr`](agents/skills/babysit-pr/SKILL.md) (a pull request to green
-  through T3's watcher, with signed replies),
-  [`prove-it`](agents/skills/prove-it/SKILL.md) (evidence on the real target)
-  and [`unattended`](agents/skills/unattended/SKILL.md) (work while Sebastian
-  is away). [`verify`](agents/skills/verify/SKILL.md),
-  [`continue`](agents/skills/continue/SKILL.md),
-  [`weekly-review`](agents/skills/weekly-review/SKILL.md) and
-  [`daily-digest`](agents/skills/daily-digest/SKILL.md) are read by path
-  from a brief or a schedule; the weekly review (Mondays 07:00) and the
-  digest (daily 18:00) run on T3 schedules in the dotfiles project. Matt Pocock's library is installed separately under
-  `~/.agents/skills`; [`bin/skill-visibility`](bin/skill-visibility) `hide`
-  (run by the installer) keeps it from loading on its own, so the agents
-  read those playbooks by path when `engineering-workflow` sends them there,
-  and `check` (run by the doctor) lists any skill outside the allowlist that
-  still loads on its own.
-- **Effort files.** Work state lives in `.scratch/<effort>/effort.md` in the
-  project (gitignored). [`bin/effort-gate`](bin/effort-gate) `new <effort>`
-  creates one from
-  [the template](agents/skills/engineering-workflow/templates/effort.md), owned
-  by the calling agent session (front matter `session:`); `claim <file>` hands
-  it to another session. As the Stop hook it keeps the owner from ending its
-  turn while the file has unfinished "done when" items; while a recorded task
-  is `running`, Claude (which wakes the session when the task ends) may stop
-  and Codex is asked for a blocking wait. After five stops without progress it
-  marks the effort blocked. As the post-compaction hook it points the owner
-  back at the file, in any worktree of the repository. Other sessions in the
-  same checkout are not gated. `.scratch/` is kept out of git through the
-  repository's `info/exclude`. Hooks: `claude/settings.json`,
-  `codex/hooks.json` (Codex asks once to trust new hooks via `/hooks`). A
-  "done when" item marked `pass` on evidence labelled a substitute stays open,
-  also in an effort set to `done`. `release` marks the commit that may start a
-  full CI run. Tests: `python3 tests/effort-gate.test.py`.
-- **Cross-runtime runs.** [`bin/agent-run`](bin/agent-run) is the earlier way
-  to start detached `codex exec` and `claude -p` runs. It is no longer part of
-  the workflow (child agents go through T3's `delegate_task`) and is removed
-  once no running effort uses it. Tests: `python3 tests/agent-run.test.py`.
-- **Tripwires.** [`bin/agent-tripwire`](bin/agent-tripwire), a PreToolUse hook
-  in both runtimes, refuses `git push` with `--force`, `-f` or a `+refspec`
-  wherever the flag sits; `--force-with-lease` stays allowed. It also refuses
-  a `ps` or `pgrep` that could print process arguments, which can carry
-  secrets: only a names-only listing such as `ps -Ao pid,rss,comm` passes.
-  Alongside it, `claude/settings.json` denies, and
-  [`codex/rules/tripwires.rules`](codex/rules/tripwires.rules) forbids, the
-  common force-push forms, repository deletion and settings changes, Docker
-  volume removal and wiping `/` or `~`. They catch the usual spellings, not a
-  push hidden in a script or `sh -c`: a tripwire, not a boundary. Codex
-  ignores symlinked rule files, so the installer copies this one. Tests:
-  `python3 tests/agent-tripwire.test.py`.
-- **Clock.** A UserPromptSubmit hook in both runtimes adds the Stockholm local
-  time to each prompt, so ETAs start from the real clock.
-- `bin/agent-messages messages|usage --days N` reads T3's database read-only:
-  Sebastian's own messages with the agent's preceding reply, and counts of
-  tool, skill and delegation use, for the weekly review.
-
-`dots-doctor` checks the links, the copied tripwire file, the seeded settings
-and the agent setup's keys in the live Claude and Codex configs;
-`dots-doctor --fix` repairs drift.
+Agent workflows live in the private [wl7r/agent-setup](https://github.com/wl7r/agent-setup) repository.
 
 ## Updating dotfiles
 
