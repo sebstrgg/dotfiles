@@ -36,6 +36,8 @@ the report and doc-only clean-up. Budget: about 30 minutes.
   Sonnet subagents with this rubric and merge their counts.
 - Rates, as shares of his messages: steering (correction + process + nudge),
   corrections, process, nudges, needless asks; and corrections per new task.
+- Efforts delivered with a passing `verify`, from the week's effort files and
+  git history. Message counts stand in for attention; they are not minutes.
 
 ## 2. Compare and diagnose
 

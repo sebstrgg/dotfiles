@@ -63,8 +63,9 @@ the user are covered by the approved brief: decide, record, continue.
 
 1. `prove-it`: the change has its intended effect on the real target, or on a
    local build against a copy of the real state when it ships through CI.
-2. The CI job's fast steps (lint, format, types) and the tests that exercise
-   changed code, locally.
+2. The CI job's fast steps (lint, format, types, repository-root checks)
+   across the whole repository, and every test that exercises changed code,
+   locally: CI runs them on the whole repository too.
 3. Code where a missed bug is expensive: the review loop in `delegate`.
 4. Once nothing blocks, that commit is the release: commit everything, run
    `~/dotfiles/bin/effort-gate release "<why>"`, and start full CI once (mark

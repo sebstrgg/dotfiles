@@ -118,6 +118,9 @@ It passes when all of these hold:
   bot has posted on the current head.
 - The proof covers every change in the diff.
 
+Merge one pull request at a time into a shared base. The next one rebases
+onto the new tip and passes the gate again.
+
 ## Merge and deploy (land mode)
 
 ```sh
