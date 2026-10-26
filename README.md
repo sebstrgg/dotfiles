@@ -180,7 +180,7 @@ machine. Start a new agent session after installation.
   [`engineering-workflow`](agents/skills/engineering-workflow/SKILL.md) (the
   path from request to verified result, routing to the rest),
   [`delegate`](agents/skills/delegate/SKILL.md) (child agents through T3's
-  `delegate_task`, the cross-family review loop, verification),
+  `delegate_task`, the review loop, verification),
   [`ship`](agents/skills/ship/SKILL.md) (pull request, merge gate, merge and
   deploy, or a hand-over at ready-to-merge),
   [`babysit-pr`](agents/skills/babysit-pr/SKILL.md) (a pull request to green

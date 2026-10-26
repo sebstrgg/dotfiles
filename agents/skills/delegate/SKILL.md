@@ -1,6 +1,6 @@
 ---
 name: delegate
-description: Hand work to other agents through T3 - model choice, briefs, parallel lanes, the cross-family review loop, verification. Use when work has parallel parts, needs another model, an independent reviewer or a verifier, before a risky change (security, auth, secrets, data, migrations, money, concurrency, public contracts) goes ready, or when Sebastian says "delegate", "use Codex/Sol/Opus", "in parallel", "review loop", "sol loop" or "second opinion".
+description: Hand work to other agents through T3 - model choice, briefs, parallel lanes, the review loop, verification. Use when work has parallel parts, needs another model, an independent reviewer or a verifier, before a risky change (security, auth, secrets, data, migrations, money, concurrency, public contracts) goes ready, or when Sebastian says "delegate", "use Codex/Sol/Opus", "in parallel", "review loop", "sol loop" or "second opinion".
 ---
 
 # Delegate
@@ -17,7 +17,7 @@ work is the judgment, or when the brief would cost more than doing it.
 - **Codex `gpt-6.1-sol`**: the workhorse with the most capacity. Tickets,
   refactors, migrations, tests and CI fixes, infrastructure, data and logs,
   parallel lanes, thorough reviews. `high` by default, `xhigh` for complex or
-  high-stakes work and reviews.
+  high-stakes work. Review effort: the review loop below.
 - **Claude Sonnet 5.5**: Claude-side work that needs Claude's tools but not
   Opus's judgment: reading and extraction across code, logs and transcripts,
   checklist browser walks (Opus judges), well-specified edits, docs and PR
@@ -33,7 +33,8 @@ work is the judgment, or when the brief would cost more than doing it.
 Claude tokens are the scarcest. A Claude orchestrator gives Sol everything a
 precise brief can carry and keeps the judgment. A Codex orchestrator runs its
 own Sol workers and brings in Opus for design, rendered-UI and copy review, a
-diagnosis Sol couldn't crack, and cross-family review.
+diagnosis Sol couldn't crack, and code review where Opus is the better reader
+(the review loop below).
 
 ## Starting a child
 
@@ -107,13 +108,22 @@ report to .scratch/<effort>/verification.md and change nothing else.
 
 ## Review loop
 
-The other family reviews code where a missed bug is expensive before its pull
+A fresh reviewer checks code where a missed bug is expensive before its pull
 request goes ready. You own the code: fix what is right, push back on what is
 wrong. Review makes the change correct, not bigger.
 
-- **Reviewer:** Claude-written code goes to `gpt-6.1-sol` at `xhigh`.
-  Codex-written code goes to `claude-opus-5-5` at `high`. One reviewer at a
-  time.
+- **Reviewer:** pick it by what changed, not by who wrote it. One reviewer
+  at a time, always a fresh child.
+  - Product behaviour, UI, copy, cross-module logic and public contracts:
+    `claude-opus-5-5`.
+  - CI, infrastructure, scripts, data handling, migrations and refactors:
+    `gpt-6.1-sol`.
+  - Change fits both: the family that didn't write it.
+- **Effort:** match the stakes, not the habit.
+  - `medium`: a small change in one module that is easy to roll back.
+  - `high`: ordinary logic changes.
+  - `xhigh`: security, auth, secrets, money, data loss, migrations,
+    concurrency, or a large cross-module change.
 - **Budget:** three rounds. Later rounds cover only the fixes and the
   findings still open. Stop early when a round returns only minors.
 - **Brief:**
