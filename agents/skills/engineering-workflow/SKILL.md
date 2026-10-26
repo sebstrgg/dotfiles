@@ -8,7 +8,8 @@ description: Sebastian's path from request to verified result. Use at the start 
 Intake, build, prove, review, deliver, verify, close. The global instructions
 own authority and the meaning of done; this skill owns the order. Questions,
 reviews and diagnosis stop after intake with an answer unless a change is
-requested. Match the ceremony to the task: a quick change (global
+requested; evidence about UI, runtime or device behaviour comes from
+`prove-it`, for a diagnosis too. Match the ceremony to the task: a quick change (global
 instructions) is made, checked once on the real target and reported.
 
 ## 1. Intake
