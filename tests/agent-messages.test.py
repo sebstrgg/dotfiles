@@ -117,6 +117,11 @@ class Usage(unittest.TestCase):
         self.assertEqual(messages.usage(db, self.WINDOW)['sebastian_messages'], 2)
         self.assertEqual(len(list(messages.messages(db, self.WINDOW))), 2)
 
+    def test_window_is_printed_in_stockholm_time_across_a_dst_change(self):
+        window = ('2026-10-19T12:51:36Z', '2026-10-26T12:51:36Z')
+        self.assertEqual(messages.usage(self.database(), window)['window'],
+                         {'since': '2026-10-19T14:51:36+02:00', 'until': '2026-10-26T13:51:36+01:00'})
+
     def test_failed_skill_read_does_not_count(self):
         db = self.database()
         for status in ('completed', 'failed'):

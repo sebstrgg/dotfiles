@@ -176,6 +176,25 @@ class EffortGate(unittest.TestCase):
                        (subagent, 'running', '2026-10-26T12:00:00Z'))
         self.assertIsNone(self.run_gate('stop', t3=True))
 
+    def test_an_ended_t3_task_is_found_by_its_plain_or_full_id(self):
+        self.record_t3_task('review-r1', 'completed')
+        full_id = 'node:delegated-task:command%3Amcp%3Aparent-thread%3Adelegate-task%3Areview-r1'
+        for handle in ('review-r1', full_id, 'tasks `review-r1`, `verify-1`'):
+            with self.subTest(handle=handle):
+                self.write_effort(task=f'| Review | T3 child | {handle} | main | running |')
+                self.assertIn('has ended: Review', self.run_gate('stop', t3=True)['reason'])
+
+    def test_a_row_naming_a_live_t3_task_keeps_waiting(self):
+        self.record_t3_task('review-r1', 'completed')
+        self.record_t3_task('review-r2', 'running')
+        self.write_effort(task='| Review | T3 child | `review-r1`, `review-r2` | main | running |')
+        self.assertIsNone(self.run_gate('stop', t3=True))
+
+    def test_a_watched_pull_request_keeps_waiting_on_t3(self):
+        self.record_t3_task('review-r1', 'completed')
+        self.write_effort(task='| PR checks | T3 watch_pull_request | PR #161 | main | running |')
+        self.assertIsNone(self.run_gate('stop', t3=True))
+
     def test_an_unreadable_t3_state_keeps_waiting_on_t3(self):
         self.write_effort(task='| Review | T3 child | task `review-r1` | main | running |')
         self.t3_state.write_text('not a database')

@@ -16,9 +16,11 @@ the report and doc-only clean-up. Budget: about 30 minutes.
   T3 tool use, skill loads per runtime (Claude `Skill` calls, Codex reads of
   `SKILL.md`), question-tool use, delegation path, hand-rolled CI waits,
   scheduled wakes and delegated briefs. Compare with the baseline's
-  `agent-messages` line.
-- `~/dotfiles/bin/agent-messages messages --days 7` gives his messages with
-  the agent's preceding reply. Classify each, from his words plus that reply:
+  `agent-messages` line. Its `window` is the report's window: copy both
+  bounds as printed, never work them out.
+- `~/dotfiles/bin/agent-messages messages --since <since> --until <until>`,
+  with that window's bounds, gives his messages with the agent's preceding
+  reply. Classify each, from his words plus that reply:
   - `new-task`: a new request or a follow-up not caused by an agent mistake.
   - `answer`: answers a question or grants an approval the agent asked for.
     Also flag `needless-ask` when the agent asked about something the global

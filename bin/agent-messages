@@ -277,7 +277,10 @@ def usage(db, window):
             script = executable(script)
             for category, pattern in COMMAND_PATTERNS.items():
                 shell[category] += bool(re.search(pattern, script))
+    since, until = (iso_time(bound).astimezone(STOCKHOLM).isoformat(timespec='seconds') for bound in window)
     return {
+        # Stockholm time with its offset: a rolling week can span a DST change.
+        'window': {'since': since, 'until': until},
         'sebastian_messages': message_count,
         'threads_with_messages': thread_count,
         'scheduled_wakes': wakes,
