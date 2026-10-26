@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read Sebastian's messages and agent usage from T3's local database, read-only."""
+"""Read messages, agent usage and a daily digest from local state, read-only."""
 import argparse
 from collections import Counter
 from contextlib import closing
@@ -8,10 +8,13 @@ import json
 import math
 from pathlib import Path
 import re
+import runpy
 import shlex
 import sqlite3
+import subprocess
 import sys
 from zoneinfo import ZoneInfo
+from urllib.parse import quote
 
 STOCKHOLM = ZoneInfo('Europe/Stockholm')
 DATABASE = Path.home() / '.t3' / 'userdata' / 'statev2.sqlite'
@@ -67,7 +70,16 @@ def arguments():
         window.add_argument('--days', type=float, help='rolling days before now (default: 7)')
         window.add_argument('--since', type=iso_time, help='inclusive ISO time; no offset means Stockholm')
         command.add_argument('--until', type=iso_time, help='exclusive ISO time; requires --since')
+    command = commands.add_parser('digest', help='one JSON digest of events and current waiting/late work')
+    command.add_argument('--since', type=iso_time, help='inclusive ISO time (default: 24 hours before until)')
+    command.add_argument('--until', type=iso_time, help='exclusive ISO time (default: now)')
     args = parser.parse_args()
+    if args.command == 'digest':
+        until = args.until or datetime.now(timezone.utc)
+        since = args.since or until - timedelta(hours=24)
+        if since >= until:
+            parser.error('--since must be earlier than --until')
+        return args.command, (since.isoformat(), until.isoformat())
     if (args.since is None) != (args.until is None):
         parser.error('--since and --until must be used together')
     if args.since is not None:
@@ -294,13 +306,284 @@ def usage(db, window):
     }
 
 
+def digest_text(value, opaque=True):
+    """Redact credentials in human-authored fields before they leave local state.
+
+    Only selected fields reach the digest; no messages, answers, commands, run
+    errors or task results are read. Opaque token-like words are redacted too.
+    """
+    text = str(value or '')
+    text = re.sub(r'-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)',
+                  '[REDACTED]', text)
+    text = re.sub(r'(?i)\b(?:https?|postgres(?:ql)?|redis)://[^\s/@]+:[^\s/@]+@',
+                  '[REDACTED]@', text)
+    text = re.sub(r'(?i)\b(?:bearer\s+|[\w-]*(?:password|passwd|secret|token|api[_ -]?key|'
+                  r'access[_ -]?key|authorization)[\w-]*[\'"]?\s*[=:]\s*)'
+                  r'(?:"[^"\n]*"|\x27[^\x27\n]*\x27|[^\s,;\x60\'"]+)',
+                  '[REDACTED]', text)
+    text = re.sub(r'\b(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-|AKIA|ASIA)[\w-]+',
+                  '[REDACTED]', text)
+    text = re.sub(r'\beyJ[\w-]+(?:\.[\w-]+){1,2}', '[REDACTED]', text)
+    # Credential-like strings, including hex keys. UUIDs and ordinary paths
+    # remain usable; long mixed-case/digit strings and hex blobs do not.
+    if opaque:
+        text = re.sub(r'\b[0-9a-fA-F]{32,}\b', '[REDACTED]', text)
+        text = re.sub(r'(?<![\w-])(?=[\w+=-]{24,}(?![\w-]))'
+                      r'(?=[\w+=-]*[A-Z])(?=[\w+=-]*[a-z])(?=[\w+=-]*\d)'
+                      r'[\w+=-]{24,}', '[REDACTED]', text)
+    return text
+
+
+def digest_time(value):
+    return iso_time(value).astimezone(STOCKHOLM).isoformat(timespec='seconds')
+
+
+def digest_tasks(db, row, gate):
+    """The effort-gate t3_task_ended lookup, using our existing read transaction.
+
+    Reuse its handle tokenizer, prefix and ended states. The SQL and treatment
+    of unknown handles deliberately match t3_task_ended (which opens its own DB).
+    """
+    tasks = []
+    for word in sorted(set(gate['T3_HANDLE_WORD'].findall(row.get('handle', '')))):
+        if word.startswith(gate['T3_TASK_ID']):
+            found = db.execute('SELECT subagent_id, status FROM orchestration_v2_projection_subagents '
+                               'WHERE subagent_id = ?', (word,)).fetchone()
+        else:
+            suffix = 'delegate-task' + quote(':' + word, safe="!*'()")
+            found = db.execute(
+                'SELECT subagent_id, status FROM orchestration_v2_projection_subagents '
+                'WHERE substr(subagent_id, -length(?)) = ? ORDER BY started_at DESC LIMIT 1',
+                (suffix, suffix)).fetchone()
+        if found:
+            tasks.append({'task_id': found[0], 'status': found[1]})
+    return tasks if tasks and all(task['status'] in gate['T3_ENDED'] for task in tasks) else []
+
+
+def digest_efforts(projects, errors):
+    """Discover each physical effort once, including linked git worktrees."""
+    roots = {}
+    for project_id, title, workspace in projects:
+        root = Path(workspace).expanduser().resolve()
+        roots.setdefault(root, (project_id, title))
+        if not root.is_dir():
+            errors.append({'path': str(root), 'operation': 'discover_efforts', 'error': 'workspace unavailable'})
+            continue
+        try:
+            result = subprocess.run(['git', '-C', str(root), 'worktree', 'list', '--porcelain', '-z'],
+                                    capture_output=True, text=True, timeout=3, check=False)
+            # A non-repository workspace is still scanned; it has no worktrees.
+            if result.returncode == 0:
+                for field in result.stdout.split('\0'):
+                    if field.startswith('worktree '):
+                        roots.setdefault(Path(field[9:]).resolve(), (project_id, title))
+            elif (root / '.git').exists():
+                errors.append({'path': str(root), 'operation': 'list_worktrees', 'error': 'git failed'})
+        except (OSError, subprocess.TimeoutExpired) as error:
+            errors.append({'path': str(root), 'operation': 'list_worktrees', 'error': type(error).__name__})
+    seen = set()
+    for root, (project_id, title) in sorted(roots.items()):
+        try:
+            # Explicit iteration reports permission failures that glob may hide.
+            scratch = root / '.scratch'
+            if not scratch.exists():
+                continue
+            for directory in sorted(scratch.iterdir()):
+                path = directory / 'effort.md'
+                if not directory.is_dir() or (not path.exists() and not path.is_symlink()):
+                    continue
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                try:
+                    text = path.read_text()
+                    modified = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+                except (OSError, UnicodeError) as error:
+                    errors.append({'effort_path': str(path), 'operation': 'read_effort',
+                                   'error': type(error).__name__})
+                    continue
+                yield path, root, project_id, title, text, modified
+        except OSError as error:
+            errors.append({'path': str(root), 'operation': 'discover_efforts', 'error': type(error).__name__})
+
+
+def digest(db, window):
+    """Windowed landed/failed events plus current waiting, late and running state.
+
+    Current state is observed now, even for an explicitly historical window;
+    age/staleness use that observation time, never the window's upper bound.
+    """
+    now = datetime.now(timezone.utc)
+    since, until = map(iso_time, window)
+    result = {'window': dict(zip(('since', 'until'), map(digest_time, window))),
+              'state_observed_at': now.astimezone(STOCKHOLM).isoformat(timespec='seconds'),
+              'landed': [], 'waiting_on_sebastian': [], 'late': [],
+              'running': {'active_efforts': 0, 'threads_with_active_run': 0}, 'errors': []}
+    errors = result['errors']
+
+    def payload(raw, source):
+        try:
+            value = json.loads(raw or '{}')
+            if not isinstance(value, dict):
+                raise ValueError('not an object')
+            return value
+        except ValueError:
+            errors.append({**source, 'error': 'invalid JSON object'})
+            return {}
+
+    def parsed_time(value, source):
+        try:
+            return iso_time(value)
+        except (argparse.ArgumentTypeError, AttributeError, TypeError):
+            errors.append({**source, 'error': 'invalid timestamp'})
+            return None
+
+    projects = list(db.execute('SELECT project_id, title, workspace_root FROM projection_projects '
+                               'WHERE deleted_at IS NULL ORDER BY project_id'))
+    project_titles = {pid: title for pid, title, _ in projects}
+    threads = {}
+    for tid, title, pid, archived, raw in db.execute(
+            'SELECT thread_id, title, project_id, archived_at, payload_json '
+            'FROM orchestration_v2_projection_threads WHERE deleted_at IS NULL ORDER BY thread_id'):
+        threads[tid] = {'thread_id': tid, 'thread_title': title, 'project_id': pid,
+                        'project_title': project_titles.get(pid), 'archived': bool(archived),
+                        'payload': payload(raw, {'thread_id': tid})}
+
+    def thread_fields(tid):
+        return {key: value for key, value in threads[tid].items() if key != 'payload'}
+
+    active_threads = set()
+    ended_runs = {'completed', 'failed', 'cancelled', 'interrupted'}
+    for rid, tid, status, completed in db.execute(
+            'SELECT run_id, thread_id, status, completed_at FROM orchestration_v2_projection_runs '
+            'ORDER BY requested_at, run_id'):
+        if tid not in threads:
+            continue
+        if status not in ended_runs and completed is None:
+            active_threads.add(tid)
+        if status == 'failed':
+            finished = parsed_time(completed, {'thread_id': tid, 'run_id': rid})
+            if finished is not None and since <= finished < until:
+                result['late'].append({'type': 'failed_run', **thread_fields(tid), 'run_id': rid,
+                                       'completed_at': digest_time(completed)})
+    result['running']['threads_with_active_run'] = len(active_threads)
+
+    for request_id, tid, node_id, kind, created, raw in db.execute(
+            "SELECT runtime_request_id, thread_id, node_id, kind, created_at, payload_json "
+            "FROM orchestration_v2_projection_runtime_requests WHERE status = 'pending' "
+            'ORDER BY created_at, runtime_request_id'):
+        if tid not in threads:
+            continue
+        source = {'thread_id': tid, 'request_id': request_id}
+        request = payload(raw, source)
+        questions = []
+
+        def question_texts(item):
+            if isinstance(item.get('question'), str):
+                questions.append(item['question'])
+            for question in item.get('questions', []) or []:
+                if isinstance(question, dict) and isinstance(question.get('question'), str):
+                    questions.append(question['question'])
+
+        question_texts(request)
+        for (item_raw,) in db.execute(
+                "SELECT payload_json FROM orchestration_v2_projection_turn_items "
+                "WHERE node_id = ? AND thread_id = ? AND type = 'user_input_request' ORDER BY ordinal",
+                (node_id, tid)):
+            question_texts(payload(item_raw, source))
+        created_time = parsed_time(created, source)
+        result['waiting_on_sebastian'].append({
+            'type': 'runtime_request', **thread_fields(tid), 'request_id': request_id, 'kind': kind,
+            'created_at': digest_time(created) if created_time else None,
+            'age_seconds': max(0, int((now - created_time).total_seconds())) if created_time else None,
+            'questions': list(dict.fromkeys(questions))})
+
+    for tid, url, raw in db.execute(
+            'SELECT thread_id, url, snapshot_json FROM projection_thread_pull_requests ORDER BY url, thread_id'):
+        if tid not in threads or not raw:
+            continue
+        pr = payload(raw, {'thread_id': tid, 'url': url})
+        fields = {'type': 'pull_request', **thread_fields(tid), 'url': url,
+                  'pr_title': pr.get('title'), 'snapshot_synced_at': pr.get('syncedAt')}
+        if str(pr.get('state', '')).lower() == 'merged':
+            merged = parsed_time(pr.get('mergedAt'), {'thread_id': tid, 'url': url})
+            if merged is not None and since <= merged < until:
+                result['landed'].append({**fields, 'merged_at': digest_time(pr['mergedAt'])})
+        elif (str(pr.get('state', '')).lower() == 'open' and pr.get('isDraft') is False
+              and tid not in active_threads
+              and threads[tid]['payload'].get('status') != 'running'):
+            result['waiting_on_sebastian'].append({**fields, 'reason': 'open_non_draft_pr_thread_not_running'})
+
+    # Reuse the gate's front matter and tables, including its definition of an
+    # open item and escaped Markdown pipes; loading it does not run its CLI.
+    gate = runpy.run_path(str(Path(__file__).resolve().with_name('effort-gate')))
+    for path, root, pid, project, text, modified in digest_efforts(projects, errors):
+        front = gate['front_matter'](text)
+        checkout = front.get('checkout')
+        if checkout and Path(checkout).expanduser().resolve() != root:
+            continue  # copied effort, owned by a different checkout (as in effort-gate)
+        status = front.get('status', '').strip('`* ').lower()
+        heading = re.search(r'^# (.+)$', text, re.MULTILINE)
+        fields = {'type': 'effort', 'effort_path': str(path), 'effort_title': heading[1] if heading else path.parent.name,
+                  'project_id': pid, 'project_title': project, 'session': front.get('session'),
+                  'status': status, 'modified_at': modified.astimezone(STOCKHOLM).isoformat(timespec='seconds')}
+        if status == 'done' and since <= modified < until:
+            # mtime is a completion proxy: editing an already-done effort can
+            # report it again; there is no status-transition history on disk.
+            result['landed'].append({**fields, 'completion_signal': 'file_mtime'})
+        if status == 'blocked':
+            section = re.search(r'^## Blockers\s*\n(.*?)(?=^## |\Z)', text, re.MULTILINE | re.DOTALL)
+            result['waiting_on_sebastian'].append({**fields, 'blockers': section[1].strip() if section else '',
+                                                   'blockers_section_present': bool(section)})
+        if status == 'active':
+            result['running']['active_efforts'] += 1
+            items = gate['open_items'](text)
+            age = (now - modified).total_seconds()
+            if items and age > 6 * 3600:
+                result['late'].append({**fields, 'type': 'stalled_effort', 'unchanged_seconds': int(age),
+                                       'open_items': items})
+        for row in gate['table'](text, 'milestones'):
+            if row.get('state', row.get('status', '')).strip('`* ').lower() != 'open':
+                continue
+            due = row.get('due (stockholm)', row.get('due', '')).strip('` ')
+            due_time = parsed_time(due, {'effort_path': str(path), 'operation': 'parse_milestone_due'})
+            if due_time is not None and due_time < now:
+                result['late'].append({**fields, 'type': 'overdue_milestone',
+                                       'milestone': row.get('milestone', ''), 'due': digest_time(due),
+                                       'overdue_seconds': int((now - due_time).total_seconds())})
+        for row in gate['running_rows'](text):
+            if gate['T3_OWNED'].search(gate['row_runtime'](row)):
+                tasks = digest_tasks(db, row, gate)
+                if tasks:
+                    result['late'].append({**fields, 'type': 'ended_task_still_running',
+                                           'task': row.get('task', '?'), 'handle': row.get('handle', ''),
+                                           'ended_tasks': tasks})
+
+    def redacted(value, key=None):
+        if isinstance(value, dict):
+            return {name: redacted(item, name) for name, item in value.items()}
+        if isinstance(value, list):
+            return [redacted(item, key) for item in value]
+        # T3's structural IDs contain long percent-encoded words that resemble
+        # opaque credentials; preserve those links, while still filtering known
+        # credential forms. Free text (including handles) gets both checks.
+        identity = key in {'thread_id', 'project_id', 'request_id', 'run_id', 'task_id', 'session'}
+        return digest_text(value, opaque=not identity) if isinstance(value, str) else value
+
+    return redacted(result)
+
+
 def main():
     command, window = arguments()
     try:
         with closing(sqlite3.connect(DATABASE.as_uri() + '?mode=ro', uri=True)) as db:
-            # One read transaction keeps both usage queries on the same live snapshot.
+            # One read transaction keeps every query on the same live snapshot.
             db.execute('BEGIN')
-            records = messages(db, window) if command == 'messages' else (usage(db, window),)
+            if command == 'messages':
+                records = messages(db, window)
+            else:
+                records = ((digest if command == 'digest' else usage)(db, window),)
             for record in records:
                 print(json.dumps(record, ensure_ascii=False))
     except (sqlite3.Error, OSError) as error:
