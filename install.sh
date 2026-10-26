@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
-    printf '%s\n' 'Usage: install.sh (interactive macOS or Ubuntu/WSL2 terminal setup)' 'Agent workflows: https://github.com/sebstrgg/agent-setup' 'FORCE_SETUP=1 reruns optional setup sections.'
+    printf '%s\n' 'Usage: install.sh (interactive macOS or Ubuntu/WSL2 terminal setup)' 'Agent workflows: https://github.com/wl7r/agent-setup' 'FORCE_SETUP=1 reruns optional setup sections.'
     exit 0
 fi
 
