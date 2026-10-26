@@ -1,6 +1,6 @@
 ---
 name: prove-it
-description: Produce evidence, observed yourself, that a change works on the real target - reproduction before and after, screenshots, recordings, live readback. Use before reporting a change done or merging it, for anything with UI, runtime, device or data behaviour, and when Sebastian asks to see that something works ("show me it works", "on mobile", "on my phone", "does it actually work"), or for proof, a screenshot or a recording.
+description: Produce evidence, observed yourself, that a change works on the real target - reproduction before and after, screenshots, recordings, live readback. Use before reporting a change done or merging it, for anything with UI, runtime, device or data behaviour, when checking whether something works or breaks (a report that a page breaks on a phone, a service misbehaves), and when Sebastian asks to see that something works ("show me it works", "on mobile", "on my phone", "does it actually work"), or for proof, a screenshot or a recording.
 ---
 
 # Prove it

@@ -1,6 +1,6 @@
 ---
 name: babysit-pr
-description: Get an open pull request to green and mergeable - checks, review comments, bots, conflicts. Use when a pull request is open and waiting on CI or review, or when Sebastian says "watch", "babysit" or "keep an eye on" a PR.
+description: Get an open pull request to green and mergeable - checks, review comments, bots, conflicts. Use when a pull request already exists and needs to get merged or mergeable, when one is waiting on CI or review, or when Sebastian says "watch", "babysit" or "keep an eye on" a PR.
 ---
 
 # Babysit a pull request
