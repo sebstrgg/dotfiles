@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Carry a finished change through its pull request to merged and deployed, or to ready-to-merge when Sebastian merges himself. Use when a change is ready for a pull request, or he says "ship it", "full send", "land it", "get this merged", "full stop", "get it ready but don't merge", "I'll merge it myself" or "take this over".
+description: Carry a finished change through its pull request to merged and deployed, or to ready-to-merge when Sebastian merges himself. Use when a change is ready for a pull request, when writing a pull request's title or description, or when he says "ship it", "full send", "land it", "get this merged", "full stop", "get it ready but don't merge", "I'll merge it myself" or "take this over".
 ---
 
 # Ship
