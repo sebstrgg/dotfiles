@@ -553,10 +553,18 @@ def digest(db, window):
             # mtime is a completion proxy: editing an already-done effort can
             # report it again; there is no status-transition history on disk.
             result['landed'].append({**fields, 'completion_signal': 'file_mtime'})
-        if status == 'blocked':
-            section = re.search(r'^## Blockers\s*\n(.*?)(?=^## |\Z)', text, re.MULTILINE | re.DOTALL)
-            result['waiting_on_sebastian'].append({**fields, 'blockers': section[1].strip() if section else '',
-                                                   'blockers_section_present': bool(section)})
+        section = re.search(r'^## Blockers\s*\n(.*?)(?=^## |\Z)', text, re.MULTILINE | re.DOTALL)
+        blockers = section[1].strip() if section else ''
+        blocked_items = [f"#{row.get('#', '?')} {row.get('item', '').strip()}"
+                         for row in gate['table'](text, 'done when')
+                         if row.get('status', '').strip('`* ').lower() == 'blocked']
+        # An active effort can wait on Sebastian too: its blocked items stay
+        # out of the gate's open items, so only its Blockers section shows it.
+        if status == 'blocked' or (status == 'active' and (
+                blocked_items or (blockers and blockers.rstrip('.').lower() != 'none'))):
+            result['waiting_on_sebastian'].append({**fields, 'blockers': blockers,
+                                                   'blockers_section_present': bool(section),
+                                                   'blocked_items': blocked_items})
         if status == 'active':
             result['running']['active_efforts'] += 1
             items = gate['open_items'](text)

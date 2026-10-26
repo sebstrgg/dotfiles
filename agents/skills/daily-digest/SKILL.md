@@ -15,8 +15,10 @@ Read-only apart from step 5: nudge no thread, fix nothing.
 2. Check each item at its source before listing it: open the effort file or
    thread it names and read its Next and newest messages. An effort that
    waits on a scheduled run is not late; one that waits on Sebastian belongs
-   under "Waits on you". A pull request counts as handed over only when its
-   thread says so; one still being worked is not waiting on him.
+   under "Waits on you"; one whose blocker is its own running work does not.
+   A pull request counts as handed over only when its thread says so. A
+   decision he already gave (Approved, Decisions, his later messages) is not
+   waiting. Take times from the reader or T3's records, never estimate them.
 3. Write the digest in this thread, one or two sentences per item, each
    with its link (`[title](t3-thread://v1/<threadId>)`, the pull request URL
    or the effort path), in this order:

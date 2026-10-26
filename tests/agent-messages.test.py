@@ -287,6 +287,16 @@ checkout: {checkout or root}
         self.assertEqual(next(r['url'] for r in out['waiting_on_sebastian'] if r['type'] == 'pull_request'), url)
         self.assertNotIn('Private body', json.dumps(out))
 
+    def test_active_effort_with_a_blocker_waits_on_sebastian(self):
+        waiting = self.effort('waiting', done_status='blocked',
+                              extra='## Blockers\n\nWaiting on Sebastian for the CI-side gate.\n')
+        self.effort('clear', extra='## Blockers\n\nNone.\n')
+        out = self.run_digest()
+        efforts = [r for r in out['waiting_on_sebastian'] if r['type'] == 'effort']
+        self.assertEqual([r['effort_path'] for r in efforts], [str(waiting)])
+        self.assertEqual(efforts[0]['blocked_items'], ['#1 Verify the result'])
+        self.assertEqual(efforts[0]['blockers'], 'Waiting on Sebastian for the CI-side gate.')
+
     def test_open_snapshot_is_checked_against_github(self):
         merged = self.pr(number=1)
         self.github[merged] = {'state': 'MERGED', 'isDraft': False,
