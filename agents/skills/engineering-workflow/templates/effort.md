@@ -27,25 +27,15 @@ final report asks each as a yes/no question.
 ## Done when
 
 Each item is checked on the real target. Status is `open`, `pass` or
-`blocked`; an item becomes `pass` when a fresh `verify` run from the other model
-family passes it, or from the family in front matter `verifier:` (set only as
-`delegate` allows). A test or substitute check never makes an item `pass`: label
-it a substitute in Evidence and leave the item open, or `blocked` with the
-access the real check needs.
+`blocked`; an item becomes `pass` when a fresh verifier (a T3 child task from
+the other model family, see `delegate`) passes it on the real target and its
+thread is cited in Evidence. A test or substitute check never makes an item
+`pass`: label it a substitute in Evidence and leave the item open, or `blocked`
+with the access the real check needs.
 
 | # | Item | Check on the real target | Status | Evidence |
 |---|---|---|---|---|
 | 1 | | | open | |
-
-## Milestones
-
-For work that runs unattended: what is true by when, judged from commits and
-merged work. Due is local `YYYY-MM-DD HH:MM`; status `open`, `met`, `missed` or
-`dropped`. The stop hook raises each one past due. Delete the section when
-nobody is away.
-
-| Due | Milestone | Check | Status |
-|---|---|---|---|
 
 ## CI runs
 
@@ -70,8 +60,7 @@ None.
 
 ## Running tasks
 
-State `running` while it runs; the stop gate reads it. Under T3, add a
-`Wake heartbeat` row in state `armed` while anything runs.
+State `running` while it runs; the stop gate reads it.
 
 | Task | Runtime, model, effort | Handle | Worktree / branch | State |
 |---|---|---|---|---|

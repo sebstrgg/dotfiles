@@ -31,28 +31,9 @@ passes `claude` and the gate lets that session end its turn. Codex has no such
 wake-up: the gate holds the session and asks for a blocking wait. These stops count
 toward the cap too, so a stale `running` row ends in `blocked` rather than holding
 or freeing the session forever; any change to an item or task row is progress.
-Under T3 (T3CODE_CLI_PATH is set) a restart kills background waits and running
-turns without waking the session, so a running task also needs a `Wake heartbeat`
-row in state `armed`: a T3 schedule that wakes the thread to restart lost waits.
-
-Two checks hold the owner once each, whatever else is open. A row under
-"## Milestones" (| Due | Milestone | Check | Status |, due as local
-`YYYY-MM-DD HH:MM`) whose due time has passed while its status is not `met`,
-`missed` or `dropped` asks for a decision: cut scope, change approach or report a
-blocker, never more of the same. An effort file over SIZE_LIMIT bytes asks for a
-rewrite into current state, once per further SIZE_LIMIT it grows.
-
-When the owner ends a turn on a finished effort (status `done` or `blocked`, or
-every item passed with nothing running), the gate holds it once more in two
-cases: items are `pass` but no `verify` run by the other runtime has finished
-under the effort's `runs/` folder (`bin/agent-run` records each run there; front
-matter `verifier: <claude|codex>` names the runtime when Sebastian chose it) after
-starting no earlier than the checkout's newest commit, or
-the brief still lists reserved actions under "Not approved" and the last message
-asks fewer questions than it lists actions (one per list item or `;`-separated
-part; a first sentence of `None.` lists none). Markers beside the effort file
-keep each to once per owner and subject; a new commit is a new subject for the
-verify question.
+An effort file over SIZE_LIMIT bytes asks for a rewrite into current state,
+once per further SIZE_LIMIT it grows. Verification evidence belongs in the
+"Done when" table; the hook does not inspect child-task records.
 """
 import contextlib
 import hashlib
@@ -67,14 +48,11 @@ from pathlib import Path
 
 MAX_IDENTICAL_BLOCKS = 5
 SIZE_LIMIT = 20_000
-MILESTONES_SETTLED = {'met', 'missed', 'dropped'}
 SKILLS = Path(__file__).resolve().parent.parent / 'agents' / 'skills'
 TEMPLATE = (Path(__file__).resolve().parents[1]
             / 'agents' / 'skills' / 'engineering-workflow' / 'templates' / 'effort.md')
 SESSION_VARIABLES = {'codex': 'CODEX_THREAD_ID', 'claude': 'CLAUDE_CODE_SESSION_ID'}
 RUNTIMES_THAT_WAKE = {'claude'}
-OTHER_FAMILY = {'claude': 'codex', 'codex': 'claude'}
-FAMILY_NAMES = {'claude': 'Claude', 'codex': 'Codex'}
 
 
 def read_event():
@@ -157,12 +135,6 @@ def table_rows(text, section):
     return ['|'.join(row.values()) for row in table(text, section)]
 
 
-def heartbeat_armed(text):
-    return any(row.get('task', '').lower().startswith('wake heartbeat')
-               and re.search(r'\barmed\b', row.get('state', ''), re.IGNORECASE)
-               for row in table(text, 'running tasks'))
-
-
 def running_tasks(text):
     return [row.get('task', '?') for row in table(text, 'running tasks')
             if re.search(r'\brunning\b', row.get('state', ''), re.IGNORECASE)]
@@ -206,104 +178,6 @@ def active_effort(cwd, session_id):
         if status == 'active':
             return path, text
     return None, None
-
-
-NOT_APPROVED = re.compile(r'\s*(?:[-*+]\s+)?\*\*not approved:?\*\*:?(.*)', re.IGNORECASE)
-FIELD = re.compile(r'\s*(?:[-*+]\s+)?\*\*[^*]+?(?::\*\*|\*\*:)')
-LIST_ITEM = re.compile(r'\s*(?:[-*+]|\d+[.)])\s')
-NONE_FIRST = re.compile(r'[\s`*_]*(?:none|nothing)[`*_]*\.[`*_]*(?:\s|$)', re.IGNORECASE)
-LINK = re.compile(r'\b[a-z][a-z0-9+.-]*://[^\s)]*[^\s).,?!:;]', re.IGNORECASE)
-# The template's earlier prompts; older effort files keep them.
-EARLIER_PLACEHOLDERS = {
-    'reserved actions that are still open.',
-    'reserved actions still open, including follow-ups the request leaves undecided '
-    '(rotating an exposed secret, going public), or `None.`; the final report asks each '
-    'as a yes/no question.',
-}
-
-
-def not_approved_text(text):
-    """The brief's "Not approved" paragraph or list: one line per list item, with
-    wrapped lines joined. It runs to the next field or heading; a blank line ends
-    it unless a list item follows."""
-    lines = text.splitlines()
-    for index, line in enumerate(lines):
-        label = NOT_APPROVED.match(line)
-        if not label:
-            continue
-        items, rest = [label.group(1).strip()], lines[index + 1:]
-        for position, following in enumerate(rest):
-            if not following.strip():
-                upcoming = next((line for line in rest[position + 1:] if line.strip()), '')
-                if LIST_ITEM.match(upcoming) or not any(items):
-                    continue
-                break
-            if FIELD.match(following) or following.lstrip().startswith('#'):
-                break
-            if LIST_ITEM.match(following) or not items[-1]:
-                items.append(following.strip())
-            else:
-                items[-1] += f' {following.strip()}'
-        return '\n'.join(item for item in items if item)
-    return ''
-
-
-def reserved_actions(text):
-    """The reserved actions the brief leaves open; '' for none or a template prompt."""
-    listed = not_approved_text(text)
-    placeholders = set(EARLIER_PLACEHOLDERS)
-    with contextlib.suppress(OSError):
-        placeholders.add(not_approved_text(TEMPLATE.read_text()))
-    if (listed in placeholders or NONE_FIRST.match(listed)
-            or listed.strip('`*_ .').lower() in ('', 'none', 'nothing')):
-        return ''
-    return listed
-
-
-def action_count(reserved):
-    """How many actions a "Not approved" text lists: one per line (list item),
-    split further at semicolons outside parentheses. Commas and "and" sit inside
-    single actions too often to split on."""
-    count = 0
-    for item in reserved.splitlines():
-        depth, part = 0, ''
-        for char in item:
-            depth = max(0, depth + {'(': 1, ')': -1}.get(char, 0))
-            if char == ';' and depth == 0:
-                count += bool(part.strip(' .'))
-                part = ''
-            else:
-                part += char
-        count += bool(part.strip(' .'))
-    return max(1, count)
-
-
-def one_line(reserved):
-    """The listed actions joined for a message, without their list markers."""
-    items = [item[marker.end():] if (marker := LIST_ITEM.match(item)) else item
-             for item in reserved.splitlines()]
-    return '; '.join(item.strip().rstrip('.;') for item in items)
-
-
-def asks(message, count=1):
-    """Whether a message ends asking at least `count` questions: `?` marks in its
-    last lines, outside links and code."""
-    if not isinstance(message, str):
-        return False
-    prose = re.sub(r'```.*?(?:```|\Z)', '', message, flags=re.DOTALL)
-    lines = [LINK.sub('', re.sub(r'`[^`]*`', '', line)) for line in prose.splitlines()
-             if line.strip()]
-    return sum(line.count('?') for line in lines[-(count + 4):]) >= count
-
-
-def closing(text, status):
-    """Whether the effort is at its close: `done` or `blocked`, or every item passed
-    with nothing running."""
-    if status in ('done', 'blocked'):
-        return True
-    rows = table(text, 'done when')
-    return (bool(rows) and not running_tasks(text)
-            and all(row.get('status', '').strip('`* ').lower() == 'pass' for row in rows))
 
 
 def own_session_id():
@@ -390,37 +264,6 @@ def mark_blocked(path, text, items):
     path.write_text(text)
 
 
-def overdue_milestone(path, text, session_id):
-    """A hold for the first unsettled milestone past its due time that this owner
-    has not yet been asked about, or None."""
-    for row in table(text, 'milestones'):
-        status = row.get('status', '').strip('`* ').lower()
-        if status in MILESTONES_SETTLED:
-            continue
-        due, name = row.get('due', '').strip(), row.get('milestone', '').strip()
-        check = row.get('check', '').strip()
-        try:
-            late = datetime.strptime(due, '%Y-%m-%d %H:%M') < datetime.now()
-        except ValueError:
-            late = None
-        subject = f'{due}\n{name}\n{check}'
-        marker = '.milestone-' + hashlib.sha256(subject.encode()).hexdigest()[:12]
-        if late is False or not first_time(path, marker, session_id, subject):
-            continue
-        if late is None:
-            return {'decision': 'block', 'reason': (
-                f'{path}: milestone "{name}" has due time "{due}", which the gate cannot read. '
-                'Write it as local `YYYY-MM-DD HH:MM` so an overdue milestone is raised.')}
-        return {'decision': 'block', 'reason': (
-            f'{path}: milestone "{name}" was due {due} and is not met. Decide now, from '
-            'evidence of what is actually done: cut scope to the next shippable piece, change '
-            'approach, or record a blocker; never more of the same. Record the decision and its '
-            'reason under "Decisions", set the milestone `met` (with evidence), `missed` or '
-            '`dropped`, move later milestones if the plan changed, and tell Sebastian in plain '
-            'words what will and will not be true when he is back.')}
-    return None
-
-
 def oversized(path, text, session_id):
     """A hold when the file has grown into a further SIZE_LIMIT than this owner was
     last asked about; shrinking and growing back asks nothing new."""
@@ -444,14 +287,9 @@ def oversized(path, text, session_id):
         return None
     return {'decision': 'block', 'reason': (
         f'{path} is {size // 1000} KB; the limit is {SIZE_LIMIT // 1000} KB. Rewrite it as current '
-        'state in plain sentences a fresh reader follows: delete finished history and run '
-        'logs (git and runs/ keep them), keep open items, decisions with reasons, approvals '
+        'state in plain sentences a fresh reader follows: delete finished history and logs; '
+        'keep open items, decisions with reasons, approvals '
         'and running tasks.')}
-
-
-def verifier(text, runtime):
-    named = front_matter(text).get('verifier', '').lower()
-    return named if named in OTHER_FAMILY else OTHER_FAMILY[runtime or 'codex']
 
 
 def stop(event, runtime=None):
@@ -462,7 +300,7 @@ def stop(event, runtime=None):
     for path, text, status in efforts:
         if status not in GATED:
             continue
-        held = overdue_milestone(path, text, session_id) or oversized(path, text, session_id)
+        held = oversized(path, text, session_id)
         if held:
             return held
     for path, text, status in efforts:
@@ -470,91 +308,7 @@ def stop(event, runtime=None):
             return hold(path, text, open_items(text), session_id, runtime)
     with contextlib.suppress(OSError):
         counter_path(session_id).unlink(missing_ok=True)
-    last_message = event.get('last_assistant_message')
-    for path, text, status in efforts:
-        if not closing(text, status):
-            continue
-        other = verifier(text, runtime)
-        since, commit = newest_commit(path.parents[2])
-        if (passed(text) and not verified_by(path, other, since)
-                and first_time(path, '.verify-question', session_id, f'{other} {commit}')):
-            return {'decision': 'block', 'reason': (
-                f'{path} has items marked `pass`, but no `verify` run by '
-                f'{FAMILY_NAMES[other]} has finished under {path.parent / "runs"} since the '
-                'newest commit in this checkout. Only a fresh verify from that family (the other '
-                'model family unless Sebastian chose one, recorded as `verifier:`), run on the '
-                'final change, makes an item `pass`; any other check adds evidence. Run one '
-                f'now with `agent-run`. If {FAMILY_NAMES[other]} could not run, '
-                'set those items back to `open` or `blocked`, record why, and correct your '
-                'report. If it did pass them by another route, name that run in Evidence.')}
-        reserved = reserved_actions(text)
-        if (reserved and not asks(last_message, action_count(reserved))
-                and first_time(path, '.close-question', session_id, reserved)):
-            return {'decision': 'block', 'reason': (
-                f'{path} lists reserved actions under "Not approved": {one_line(reserved)}. '
-                'End your report with each one still open as a yes/no question to Sebastian '
-                'with your recommended answer, above all one his request left undecided. An '
-                'action leaves "Not approved" only once Sebastian has answered it: move it to '
-                '"Approved" with where he answered.')}
     return None
-
-
-def passed(text):
-    return any(row.get('status', '').strip('`* ').lower() == 'pass'
-               for row in table(text, 'done when'))
-
-
-def newest_commit(checkout):
-    """The checkout's HEAD as (commit time in epoch seconds, hash); (None, None)
-    outside git or before the first commit."""
-    try:
-        result = subprocess.run(['git', '-C', str(checkout), 'log', '-1', '--format=%ct %H'],
-                                capture_output=True, text=True, timeout=5)
-        when, commit = result.stdout.split()
-        return int(when), commit
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None, None
-
-
-def verified_by(path, runtime, since):
-    """Whether a `verify` run by `runtime` has finished under the effort's runs
-    folder, started no earlier than `since` (epoch seconds, or None for any time):
-    a verify from before the latest commit did not check it."""
-    for record in path.parent.glob('runs/*/command.json'):
-        try:
-            run = json.loads(record.read_text())
-            finished = (record.parent / 'exit').read_text().strip() == '0'
-        except (OSError, ValueError):
-            continue
-        if not (finished and isinstance(run, dict) and run.get('role') == 'verify'
-                and run.get('runtime') == runtime):
-            continue
-        try:
-            started = datetime.strptime(str(run.get('started')), '%Y-%m-%dT%H:%M:%S%z').timestamp()
-        except ValueError:
-            started = None
-        if since is None or (started is not None and started >= since):
-            return True
-    return False
-
-
-def first_time(path, marker_name, session_id, subject):
-    """Record a close-time question for this owner and subject; False if already
-    asked, or if it cannot be recorded, since an unrecorded question would repeat."""
-    marker = path.parent / marker_name
-    signature = hashlib.sha256(f'{session_id}\n{subject}'.encode()).hexdigest()
-    try:
-        if marker.read_text(errors='replace').strip() == signature:
-            return False
-    except FileNotFoundError:
-        pass
-    except OSError:
-        return False
-    try:
-        marker.write_text(f'{signature}\n')
-    except OSError:
-        return False
-    return True
 
 
 def stops_without_progress(session_id, signature):
@@ -590,19 +344,9 @@ def hold(path, text, items, session_id, runtime):
             f'{path} still has open work: {"; ".join(pending)}.')}
     if count >= MAX_IDENTICAL_BLOCKS:
         mark_blocked(path, text, pending)
-        reserved = reserved_actions(text)
         return {'systemMessage': (
             f'Effort gate: the agent stopped {MAX_IDENTICAL_BLOCKS} times without progress. '
-            f'{path} is now marked blocked; still open: {"; ".join(pending)}.'
-            + (f' Not approved, for you to decide: {one_line(reserved)}.' if reserved else ''))}
-    if tasks and os.environ.get('T3CODE_CLI_PATH') and not heartbeat_armed(text):
-        return {'decision': 'block', 'reason': (
-            f'{path} records a running task: {"; ".join(tasks)}. A T3 restart kills waits '
-            'without waking this session, so arm a heartbeat before ending the turn: one '
-            '`schedule_task` interval of 15 minutes bound to this thread, prompting it to re-read '
-            'the effort file, restart any wait that is gone, and delete the schedule once '
-            'nothing runs. Record it under "Running tasks" as `| Wake heartbeat | T3 schedule | '
-            '<scheduled task id> | - | armed |`.')}
+            f'{path} is now marked blocked; still open: {"; ".join(pending)}.')}
     if tasks and runtime in RUNTIMES_THAT_WAKE:
         return None
     if tasks:
@@ -612,10 +356,9 @@ def hold(path, text, items, session_id, runtime):
             'already finished, record that and continue.')}
     return {'decision': 'block', 'reason': (
         f'{path} has "done when" items not yet `pass`: {"; ".join(items)}. '
-        'Continue the work. An item becomes `pass` when a fresh `verify` run by '
-        f'{FAMILY_NAMES[verifier(text, runtime)]} (`~/dotfiles/bin/agent-run start '
-        f'{verifier(text, runtime)} verify`, see `delegate`; the other model family unless '
-        '`verifier:` names one) passes it on the real target; a '
+        'Continue the work. An item becomes `pass` when a fresh verifier (a T3 child task '
+        'from the other model family, see `delegate`) passes it on the real target and '
+        'its thread is cited in Evidence; a '
         'substitute check never makes an item `pass`. If you cannot proceed, '
         'record the blocker and set `status: blocked`; once every item passes, set '
         '`status: done`. End with a report of the work to Sebastian.')}
