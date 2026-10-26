@@ -18,8 +18,7 @@ def counts(command, category):
 
 
 def skill_reads(command):
-    return set(messages.SKILL_READ.findall(
-        messages.without_heredoc_bodies(messages.unwrapped(command))))
+    return messages.skills_read(messages.unwrapped(command))
 
 
 class Commands(unittest.TestCase):
@@ -53,6 +52,10 @@ class Commands(unittest.TestCase):
         self.assertTrue(counts("echo it\\'s\nagent-run start codex review r", 'agent-run start'))
         self.assertFalse(counts('# agent-run start codex review r', 'agent-run start'))
 
+    def test_herestring_or_quoted_heredoc_marker_hides_nothing(self):
+        self.assertTrue(counts('cat <<< "hello"\ngh run watch 1', 'hand_rolled_ci_waits'))
+        self.assertTrue(counts("echo '<<EOF'\ngh run watch 1", 'hand_rolled_ci_waits'))
+
     def test_loop_around_gh_counts(self):
         self.assertTrue(counts('until gh pr checks 3; do sleep 30; done', 'hand_rolled_ci_waits'))
 
@@ -63,6 +66,10 @@ class SkillReads(unittest.TestCase):
                          {'delegate'})
         self.assertEqual(skill_reads("sed -n 1,80p ~/.codex/skills/.system/openai-docs/SKILL.md"),
                          {'openai-docs'})
+
+    def test_every_file_one_command_reads_counts(self):
+        self.assertEqual(skill_reads('cat a/skills/delegate/SKILL.md b/skills/research/SKILL.md'),
+                         {'delegate', 'research'})
 
     def test_mentioning_a_skill_path_does_not_count(self):
         self.assertEqual(skill_reads('echo ~/.codex/skills/delegate/SKILL.md'), set())

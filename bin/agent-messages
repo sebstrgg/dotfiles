@@ -34,11 +34,12 @@ COMMAND_PATTERNS = {
 SHELLS = {'sh', 'bash', 'zsh'}
 SHELL_SCRIPT_FLAGS = ('-c', '-lc', '-lic')
 OPERATORS = ('&&', '||', ';', '|')
-HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+# A heredoc opener, or quoted text that may only look like one: one ordered
+# scan, so `<<'EOF'` opens a heredoc and `echo '<<EOF'` does not.
+HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)(\w+)\1|'[^']*'|\"(?:\\.|[^\"\\])*\"")
 SUBSTITUTION = re.compile(r'\$\(([^()]*)\)')
-SKILL_READ = re.compile(
-    r'(?<![\w-])(?:cat|sed|head|tail|nl|less|bat)\b[^\n;&|]*?'
-    r'skills/(?:\.system/)?([\w-]+)/SKILL\.md\b')
+SKILL_READER = re.compile(r'(?<![\w-])(?:cat|sed|head|tail|nl|less|bat)\b[^\n;&|]*')
+SKILL_FILE = re.compile(r'skills/(?:\.system/)?([\w-]+)/SKILL\.md\b')
 
 
 def iso_time(value):
@@ -115,7 +116,7 @@ def without_heredoc_bodies(script):
                 delimiters.pop(0)
             continue
         kept.append(line)
-        delimiters = [match.group(2) for match in HEREDOC.finditer(line)]
+        delimiters = [match.group(2) for match in HEREDOC.finditer(line) if match.group(2)]
     return '\n'.join(kept)
 
 
@@ -149,6 +150,12 @@ def executable(script):
             out.append(char)
             i += 1
     return ''.join(out)
+
+
+def skills_read(script):
+    """Skills whose SKILL.md a reader command in `script` opens."""
+    return {name for reader in SKILL_READER.findall(without_heredoc_bodies(script))
+            for name in SKILL_FILE.findall(reader)}
 
 
 def messages(db, window):
@@ -231,7 +238,7 @@ def usage(db, window):
             script = unwrapped(command)
             if provider == 'codex':
                 # Codex loads a skill by reading its file.
-                for name in set(SKILL_READ.findall(without_heredoc_bodies(script))):
+                for name in skills_read(script):
                     skills['codex'][name] += 1
             script = executable(script)
             for category, pattern in COMMAND_PATTERNS.items():
