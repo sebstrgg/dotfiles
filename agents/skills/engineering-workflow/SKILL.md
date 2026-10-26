@@ -58,6 +58,12 @@ the user are covered by the approved brief: decide, record, continue.
   the class: find every sibling of the defect and fix or report the set.
   Never loosen a type, test or public contract to turn a check green: that
   shrinks the promise instead of keeping it.
+- Run independent work in parallel from the start: lanes per `delegate`, and
+  paid or rate-limited calls at the provider's actual limits within the
+  budget. Never leave work idle behind something it does not depend on.
+  Splitting work is your decision, not a question. The two-heavy-jobs limit
+  covers builds and browser suites on the Mac, not children running
+  elsewhere.
 - Hit every surface the change touches: each entry point, client and adapter,
   the reverse state (undo, re-enable), docs.
 - Commit in small, meaningful steps.

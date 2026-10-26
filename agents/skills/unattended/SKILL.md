@@ -34,8 +34,8 @@ Before he leaves:
 
 While he is away:
 
-- Run independent lanes in parallel (`delegate`); never leave a lane idle
-  waiting on another that it does not depend on.
+- Parallel lanes as in `engineering-workflow` §3: no lane waits on one it
+  does not depend on.
 - T3 child tasks and watched pull requests wake you; they need no
   heartbeat. Background shell jobs wake you when they exit, but a T3 restart
   kills them without a word. While one runs, keep one hourly schedule bound
