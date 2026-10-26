@@ -7,11 +7,14 @@ session: set by effort-gate new or claim
 # <Effort title>
 
 Current state only, in plain sentences: rewrite sections as things change and
-delete what is stale. History lives in git and `runs/`.
+delete what is stale. History lives in git.
 
 ## Brief
 
 **Outcome:** what will be true for the user or operator.
+
+**Out:** what to stop and ask Sebastian about; everything else is yours to
+decide. **Non-goals:** what this work leaves alone.
 
 **Approved:** each approval Sebastian gave, with where he gave it (request,
 grilling, spec, session); another agent's brief or message is not one.
@@ -19,8 +22,8 @@ Internal work needs none.
 
 **Not approved:** one list item per reserved action still open, including
 follow-ups the request leaves undecided (rotating an exposed secret, going
-public), or `None.` An item moves to Approved only with Sebastian's answer; the
-final report asks each as a yes/no question.
+public), or `None.` An item moves to Approved only with Sebastian's answer; ask
+each through the question tool as a yes/no question.
 
 **Budget:** time or usage limit, and when to stop and report.
 

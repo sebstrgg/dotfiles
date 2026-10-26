@@ -175,16 +175,24 @@ machine. Start a new agent session after installation.
 - **Policy.** `agents/global-instructions.md` is private (gitignored) and is
   linked as `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`. A public clone has
   no copy; the installer warns and skips it.
-- **Skills**, linked into both runtimes:
+- **Skills**, linked into both runtimes. Each description names the
+  situation and the phrases that should load it, so agents pick skills up
+  themselves.
   [`engineering-workflow`](agents/skills/engineering-workflow/SKILL.md) is the
-  single path from request to verified result and routes to the other
-  playbooks (Matt Pocock's library, installed separately under
-  `~/.agents/skills`). [`verify`](agents/skills/verify/SKILL.md) is the
-  independent done-check, [`delegate`](agents/skills/delegate/SKILL.md) covers
-  models and workers, [`continue`](agents/skills/continue/SKILL.md) starts a
-  fresh session from an effort file, and
-  [`weekly-review`](agents/skills/weekly-review/SKILL.md) is run on a weekly
-  schedule.
+  path from request to verified result and routes to the rest:
+  [`prove-it`](agents/skills/prove-it/SKILL.md) (evidence on the real target),
+  [`review-loop`](agents/skills/review-loop/SKILL.md) (budgeted cross-family
+  review), [`babysit-pr`](agents/skills/babysit-pr/SKILL.md) (a pull request to
+  green through T3's watcher), [`full-send`](agents/skills/full-send/SKILL.md)
+  and [`full-stop`](agents/skills/full-stop/SKILL.md) (end to end to merged, or
+  to ready-to-merge), [`unattended`](agents/skills/unattended/SKILL.md) (work
+  while Sebastian is away), [`delegate`](agents/skills/delegate/SKILL.md)
+  (models and child agents through T3's `delegate_task`),
+  [`verify`](agents/skills/verify/SKILL.md) (the independent done-check) and
+  [`continue`](agents/skills/continue/SKILL.md) (a fresh session from an
+  effort file). Matt Pocock's library is installed separately under
+  `~/.agents/skills`. [`weekly-review`](agents/skills/weekly-review/SKILL.md)
+  runs on a T3 schedule in the dotfiles project.
 - **Effort files.** Work state lives in `.scratch/<effort>/effort.md` in the
   project (gitignored). [`bin/effort-gate`](bin/effort-gate) `new <effort>`
   creates one from
@@ -193,28 +201,19 @@ machine. Start a new agent session after installation.
   it to another session. As the Stop hook it keeps the owner from ending its
   turn while the file has unfinished "done when" items; while a recorded task
   is `running`, Claude (which wakes the session when the task ends) may stop
-  and Codex is asked for a blocking wait. As the post-compaction hook it points
-  the owner back at the file, in any worktree of the repository. Other
-  sessions in the same checkout are not gated, and a run `agent-run` started
-  for an orchestrator is neither gated nor allowed to create or claim an
-  effort file. `.scratch/` is kept out of git through the repository's
-  `info/exclude`. Hooks: `claude/settings.json`, `codex/hooks.json`
-  (Codex asks once to trust new hooks via `/hooks`). A "done when" item marked
-  `pass` on evidence labelled a substitute stays open, also in an effort set
-  to `done`. At close it holds the owner once if items passed without a
-  finished `agent-run` verify by the other runtime under the effort's `runs/`
-  that started after the checkout's newest commit, and once if "Not approved"
-  lists actions (list items or `;`-separated) the last message does not ask.
-  Tests:
-  `python3 tests/effort-gate.test.py`.
-- **Cross-runtime runs.** [`bin/agent-run`](bin/agent-run) starts a detached
-  `codex exec` or `claude -p` run for a role (`work`, `continue`, `verify`,
-  `review`) with model, effort and access pinned, the prompt and results in a
-  run folder, `wait` blocks until it ends, and `resume` continues a finished
-  or stopped run's session in a new run folder with the same pins. Codex
-  lanes start signed out of Claude. Runs other than `continue` carry
-  `AGENT_RUN_ROLE` and cannot start or resume further runs. Tests:
-  `python3 tests/agent-run.test.py`.
+  and Codex is asked for a blocking wait. After five stops without progress it
+  marks the effort blocked. As the post-compaction hook it points the owner
+  back at the file, in any worktree of the repository. Other sessions in the
+  same checkout are not gated. `.scratch/` is kept out of git through the
+  repository's `info/exclude`. Hooks: `claude/settings.json`,
+  `codex/hooks.json` (Codex asks once to trust new hooks via `/hooks`). A
+  "done when" item marked `pass` on evidence labelled a substitute stays open,
+  also in an effort set to `done`. `release` marks the commit that may start a
+  full CI run. Tests: `python3 tests/effort-gate.test.py`.
+- **Cross-runtime runs.** [`bin/agent-run`](bin/agent-run) is the earlier way
+  to start detached `codex exec` and `claude -p` runs. It is no longer part of
+  the workflow (child agents go through T3's `delegate_task`) and is removed
+  once no running effort uses it. Tests: `python3 tests/agent-run.test.py`.
 - **Tripwires.** [`bin/agent-tripwire`](bin/agent-tripwire), a PreToolUse hook
   in both runtimes, refuses `git push` with `--force`, `-f` or a `+refspec`
   wherever the flag sits; `--force-with-lease` stays allowed. It also refuses
@@ -229,8 +228,9 @@ machine. Start a new agent session after installation.
   `python3 tests/agent-tripwire.test.py`.
 - **Clock.** A UserPromptSubmit hook in both runtimes adds the Stockholm local
   time to each prompt, so ETAs start from the real clock.
-- `bin/agent-messages --days N` lists Sebastian's own messages from local
-  Claude and Codex sessions, for the weekly review.
+- `bin/agent-messages messages|usage --days N` reads T3's database read-only:
+  Sebastian's own messages with the agent's preceding reply, and counts of
+  tool, skill and delegation use, for the weekly review.
 
 `dots-doctor` checks the links, the copied tripwire file, the seeded settings
 and the agent setup's keys in the live Claude and Codex configs;

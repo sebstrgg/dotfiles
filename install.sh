@@ -463,7 +463,7 @@ ok "Claude Code config linked"
 
 # Share workflow skills across local coding agents.
 mkdir -p "$HOME/.claude/skills" "$HOME/.codex/skills"
-for skill in engineering-workflow verify continue delegate weekly-review; do
+for skill in engineering-workflow verify continue delegate weekly-review full-send full-stop babysit-pr review-loop prove-it unattended; do
     link_config "$SCRIPT_DIR/agents/skills/$skill" "$HOME/.claude/skills/$skill"
     link_config "$SCRIPT_DIR/agents/skills/$skill" "$HOME/.codex/skills/$skill"
 done

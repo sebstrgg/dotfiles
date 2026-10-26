@@ -1,56 +1,70 @@
 ---
 name: weekly-review
-description: Weekly review of agent autonomy and project hygiene.
+description: Weekly measurement of how much of Sebastian's attention agents still need, with one improvement proposal. Use when the weekly schedule fires or he asks for the weekly review.
 disable-model-invocation: true
 ---
 
 # Weekly review
 
-Measure whether agents carry more work with less of Sebastian's attention, keep
-projects free of stale working files, and propose at most one improvement.
-Budget: about 20 minutes. Report only what is new or needs Sebastian.
+Measure whether agents carry more work with less of Sebastian's attention,
+find the pattern that costs him most, and propose one fix. Read-only except
+the report and doc-only clean-up. Budget: about 30 minutes.
 
-## 1. Where Sebastian's attention went
+## 1. Measure
 
-Run `~/dotfiles/bin/agent-messages --days 7`. Headless and delegated runs
-started from a T3 session are recorded like Sebastian's own messages, so first
-drop prompts an agent wrote (briefs, structured task prompts, test prompts).
-Classify each remaining message:
+- `~/dotfiles/bin/agent-messages usage --days 7` gives counts: his messages,
+  T3 tool use, skill loads, question-tool use, delegation path, hand-rolled
+  CI waits and scheduled wakes.
+- `~/dotfiles/bin/agent-messages messages --days 7` gives his messages with
+  the agent's preceding reply. Classify each, from his words plus that reply:
+  - `new-task`: a new request or a follow-up not caused by an agent mistake.
+  - `answer`: answers a question or grants an approval the agent asked for.
+    Also flag `needless-ask` when the agent asked about something the global
+    instructions let it decide (his reply is "your rec", "use your
+    judgment", "just do it").
+  - `correction`: the agent got something wrong.
+  - `process`: he had to enforce how work is done (verify it, use the
+    browser, commit, use a tool, follow a rule).
+  - `nudge`: "continue", "status?", "why did you stop".
+  - `question` and `other`.
+  For corrections, process and nudges, add a theme: wrong-approach,
+  wrong-assumption, ignored-instruction, ui-quality, false-done,
+  skipped-verification, stopped-early, over-process, tooling-misuse,
+  communication, scope-creep. Over ~150 messages, split them across two
+  Sonnet subagents with this rubric and merge their counts.
+- Rates, as shares of his messages: steering (correction + process + nudge),
+  corrections, process, nudges, needless asks; and corrections per new task.
 
-- **Valuable**: direction, priorities, taste, a genuine decision, new information.
-- **Avoidable**: approving the agent's own recommendation, "continue" or
-  status and ETA pings, relaying between sessions, pasting starter prompts,
-  reminding agents of an existing rule.
-- **Rescue**: reporting that something declared done does not work, or
-  correcting a wrong result.
+## 2. Compare and diagnose
 
-Count per category, and count efforts delivered with a passing `verify` (from
-the week's effort files and git history). Compare with the previous report.
-Message counts stand in for attention; they are not minutes.
-
-## 2. Stale working files
-
-In each repository under `~/code` with commits this week:
-
-- effort files untouched for 14 days or marked `done`;
-- plan, spec and ticket files for finished work;
-- docs that contradict the code.
-
-Fix doc-only staleness directly: update or delete, check against the code,
-commit, and merge per delivery. Anything beyond docs becomes a proposal.
+- Put each rate next to last week's (the newest earlier report) and the
+  baseline in `2026-10-26-baseline.md`. A change of a few points on a few
+  hundred messages is noise; say so.
+- Check that the skills are used where they should be: are `full-send`,
+  `prove-it`, `review-loop` and `babysit-pr` loaded in threads that shipped
+  or proved changes? Is delegation going through `delegate_task`, PR waits
+  through `watch_pull_request`, blocking questions through the question tool?
+- Take the largest theme. Read two or three of its threads and ask what in
+  the agent's context pointed it the wrong way (`retro`).
 
 ## 3. One improvement
 
-Find the most frequent avoidable or rescue pattern. Apply `retro` to two or three
-of its examples and propose one change to the environment (a check, a tool, a
-template, or one rule replacing an existing one) with its evidence. Rule
-changes wait for Sebastian's approval.
+Propose one change, highest rung first: remove the failure in code or
+architecture; else a check, lint, test or tool; else a skill edit; else one
+global rule that replaces an existing one. Give the evidence and the expected
+effect on next week's numbers. Rule and skill changes wait for Sebastian:
+ask through the question tool with your recommendation.
+
+## 4. Stale files
+
+In each repository under `~/code` with commits this week: effort files
+marked `done` or untouched for 14 days, plan, spec and ticket files for
+finished work, and docs that contradict the code. Fix doc-only staleness
+(check against the code, commit, merge); list the rest.
 
 ## Report
 
-Counts with last week's next to them, the clean-up done, the one proposal, and
-anything that needs Sebastian. When nothing changed and nothing is needed, say
-so in one line.
-
-Save it as `~/dotfiles/.scratch/weekly-review/<YYYY-MM-DD>.md`; last week's
-report is the newest file there. Keep the four newest.
+Save it as `~/dotfiles/.scratch/weekly-review/<YYYY-MM-DD>.md`, keep the
+eight newest plus the baseline. In the thread: a small table of this week,
+last week and baseline, the top theme with two examples, the proposal, the
+clean-up done. When nothing changed and nothing is needed, one line.
