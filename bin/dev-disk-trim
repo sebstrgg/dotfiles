@@ -250,19 +250,44 @@ thread_idle() {
 	[[ $busy == 0 && ! -s $lock.stderr ]]
 }
 
+worktrees() {
+	local record
+	while IFS= read -r -d '' record; do
+		# A newline would split one path into two; such a tree is never trimmed.
+		[[ $record == 'worktree '* && $record != *$'\n'* ]] && printf '%s\n' "${record#worktree }"
+	done < <(git -C "$1" worktree list --porcelain -z)
+}
+
+# A cache that another checkout links to is read through that link: reads leave
+# no mtime, open files or thread activity in the owning worktree, so keep it.
+shared_caches=
+for repository in "$HOME"/code/*; do
+	[[ -d $repository/.git ]] || continue
+	while IFS= read -r worktree; do
+		for relative in api/.venv web/node_modules web/.next; do
+			[[ -L $worktree/$relative ]] || continue
+			if target=$(cd -P "$worktree/$relative" 2>/dev/null && pwd); then
+				shared_caches+="$target"$'\n'
+			fi
+		done
+	done < <(worktrees "$repository")
+done
+
 # Only rebuildable ignored caches in registered secondary worktrees are eligible.
 # Keep source, branches, scratch evidence and every active or recently used tree.
 for repository in "$HOME"/code/*; do
 	[[ -d $repository/.git ]] || continue
 	safe_dir "$repository" || continue
-	while IFS= read -r -d '' record; do
-		[[ $record == 'worktree '* ]] || continue
-		worktree=${record#worktree }
+	while IFS= read -r worktree; do
 		[[ $worktree == "$HOME/code/"* && $worktree != "$repository" ]] || continue
 		safe_dir "$worktree" || continue
 		for relative in api/.venv web/node_modules web/.next; do
 			dir="$worktree/$relative"
 			safe_dir "$dir" || continue
+			if [[ $'\n'$shared_caches == *$'\n'"$dir"$'\n'* ]]; then
+				log worktree_cache linked_from_other_checkout "$dir"
+				continue
+			fi
 			if building || ! cache_cold "$dir" || ! thread_idle "$worktree" || ! unused "$worktree"; then
 				log worktree_cache active_recent_or_inspection_failed "$dir"
 				continue
@@ -277,7 +302,7 @@ for repository in "$HOME"/code/*; do
 				log worktree_cache activity_changed "$dir"
 			fi
 		done
-	done < <(git -C "$repository" worktree list --porcelain -z)
+	done < <(worktrees "$repository")
 done
 
 for dir in /private/tmp/* /private/tmp/.[!.]* /private/tmp/..?*; do

@@ -62,7 +62,8 @@ target is handled directly. Agent databases,
 Docker volumes, CoreSimulator, and project sources are excluded. Registered secondary
 worktrees may lose ignored `api/.venv`, `web/node_modules` and `web/.next` only after
 six hours without writes or recent T3 activity, with fresh build and open-handle
-checks. Rebuildable caches are deleted directly without backups; branches,
+checks. A cache that any checkout under `~/code` links to stays: reads through
+the link leave no trace in its own worktree. Rebuildable caches are deleted directly without backups; branches,
 worktrees and other ignored data remain. Failed inspection preserves the cache.
 This can exhaust safe candidates before reaching 67%; it does not guarantee a
 ceiling during active writes. A real run still above 70% exits nonzero.
