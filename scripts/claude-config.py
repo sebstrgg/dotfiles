@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -13,6 +14,8 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 HOME = Path.home()
 STATUS = {'type': 'command', 'command': '~/.claude/statusline.sh', 'padding': 2}
+# The usage-window keeper was removed; an earlier install left these behind.
+KEEPER = (HOME / 'Library/LaunchAgents/com.sebastian.claude-window-keeper.plist', HOME / '.local/bin/claude-window-keeper')
 
 
 def backup(path):
@@ -39,6 +42,15 @@ def write(path, content):
             os.unlink(name)
 
 
+def retire_keeper():
+    plist, link = KEEPER
+    if plist.exists():
+        subprocess.run(['launchctl', 'bootout', f'gui/{os.getuid()}', str(plist)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        plist.unlink()
+    if link.is_symlink():
+        link.unlink()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('install', 'check'))
@@ -49,6 +61,7 @@ def main():
     links = [('claude/statusline.sh', '.claude/statusline.sh')]
     if args.command == 'install':
         write(settings, json.dumps(expected, indent=2) + '\n')
+        retire_keeper()
         for src, dst in links:
             target = HOME / dst
             if target.is_symlink() and target.resolve() == ROOT / src:
@@ -63,6 +76,7 @@ def main():
     for src, dst in links:
         target = HOME / dst
         good &= target.is_symlink() and target.resolve() == ROOT / src
+    good &= not any(path.exists() or path.is_symlink() for path in KEEPER)
     print(('OK' if good else 'FAIL') + ': Claude statusline key and link')
     return 0 if good else 1
 

@@ -19,7 +19,7 @@ class ClaudeConfig(unittest.TestCase):
         self.bin = self.home / 'bin'
         self.bin.mkdir()
         self.env = {'HOME': str(self.home), 'PATH': str(self.bin) + ':' + os.environ['PATH'], 'TZ': 'UTC'}
-        for name in ('gh',):
+        for name in ('gh', 'launchctl'):
             stub = self.bin / name
             stub.write_text('#!/bin/sh\nexit 99\n')
             stub.chmod(0o755)
@@ -49,6 +49,19 @@ class ClaudeConfig(unittest.TestCase):
         data = json.loads((self.home / '.claude/settings.json').read_text())
         self.assertEqual(list(data), ['statusLine'])
         self.helper('check')
+
+    def test_install_retires_the_removed_keeper(self):
+        plist = self.home / 'Library/LaunchAgents/com.sebastian.claude-window-keeper.plist'
+        link = self.home / '.local/bin/claude-window-keeper'
+        plist.parent.mkdir(parents=True)
+        plist.write_text('<plist/>')
+        link.parent.mkdir(parents=True)
+        link.symlink_to(self.home / 'missing')
+        self.helper('install')
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/claude-config.py'), 'check'], env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertFalse(plist.exists())
+        self.assertFalse(link.is_symlink())
 
     def test_statusline_state_and_deduplicated_snapshot(self):
         fixture = {'model': {'display_name': 'Opus', 'id': 'claude-opus-5-5'}, 'session_id': 'fixture', 'effort': {'level': 'high'}, 'rate_limits': {'five_hour': {'used_percentage': 12, 'resets_at': 2000000000}}}
