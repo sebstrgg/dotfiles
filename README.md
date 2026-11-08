@@ -174,10 +174,10 @@ repairs these files and reloads the keeper on the real macOS home. On macOS
 the installer also loads `launchd/com.sebastian.t3code.autostart.plist`,
 which opens T3 Code at login. The rest of the agent-related files here are
 personal terminal choices: `CLAUDE_CODE_NO_FLICKER` and the agent-shell alias
-guard in `.zshrc`, the claude and codex windows in `tmux/session-dev.sh`,
+guard in `.zshrc`, the claude, codex, gemini and kimi windows in `tmux/session-dev.sh`,
 `dev-disk-trim`'s clean-up of idle worktree caches and old Codex runtimes,
 the Claude Code section of `tmux/tmux.conf` (passthrough and extended keys),
-Ghostty's Claude Code tuning, and `ripgrep` in the Brewfile. The Bitwarden
+`ripgrep` in the Brewfile, and the `.gitignore` rule for agent working state. The Bitwarden
 bridge (`bin/bw-bridge`, `bin/bw-vault`, `bin/bw-ssh` and the
 `bw-bridge-expire` launch agent) lets agents use the vault without seeing a
 credential; it stays here because it is tied to this machine's Keychain and
