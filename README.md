@@ -170,7 +170,12 @@ The first install seeds it from `zsh/.zshrc.local.example`; edit it freely.
 Dotfiles owns the Claude statusline and the macOS usage-window keeper. The
 installer and doctor merge only `statusLine` in Claude settings; the keeper
 uses Claude subscription usage when a window expires. `dots-doctor --fix`
-repairs these files and reloads the keeper on the real macOS home.
+repairs these files and reloads the keeper on the real macOS home. On macOS
+the installer also loads `launchd/com.sebastian.t3code.autostart.plist`,
+which opens T3 Code at login. The rest of the agent-related files here are
+personal terminal choices: `CLAUDE_CODE_NO_FLICKER` and the agent-shell alias
+guard in `.zshrc`, the claude and codex windows in `tmux/session-dev.sh`, and
+`dev-disk-trim`'s clean-up of idle worktree caches and old Codex runtimes.
 
 Agent workflows live in the private [wl7r/agent-setup](https://github.com/wl7r/agent-setup) repository.
 

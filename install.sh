@@ -460,7 +460,7 @@ fi
 info "Setting up Claude statusline and window keeper..."
 python3 "$SCRIPT_DIR/scripts/claude-config.py" install
 
-# Launch agents: Claude window keeper, development disk trim and Bitwarden bridge expiry. Copied, not symlinked: launchd does not reliably
+# Launch agents: Claude window keeper, T3 Code at login, development disk trim and Bitwarden bridge expiry. Copied, not symlinked: launchd does not reliably
 # load symlinked agents.
 if [[ "$PLATFORM" == "macos" ]]; then
     for _src in "$SCRIPT_DIR"/launchd/*.plist; do
