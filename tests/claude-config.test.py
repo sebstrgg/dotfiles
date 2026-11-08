@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the real helper, statusline and keeper only inside temp HOMEs."""
+"""Exercise the real helper and statusline only inside temp HOMEs."""
 import json
 import os
 from pathlib import Path
@@ -19,7 +19,7 @@ class ClaudeConfig(unittest.TestCase):
         self.bin = self.home / 'bin'
         self.bin.mkdir()
         self.env = {'HOME': str(self.home), 'PATH': str(self.bin) + ':' + os.environ['PATH'], 'TZ': 'UTC'}
-        for name in ('gh', 'launchctl'):
+        for name in ('gh',):
             stub = self.bin / name
             stub.write_text('#!/bin/sh\nexit 99\n')
             stub.chmod(0o755)
@@ -33,7 +33,7 @@ class ClaudeConfig(unittest.TestCase):
         path.parent.mkdir()
         old = {'model': 'keep', 'env': {'PRIVATE_TEST_VALUE': 'local-only'}, 'hooks': {'Stop': []}, 'statusLine': {'command': 'old'}}
         path.write_text(json.dumps(old))
-        self.helper('install', '--reload')
+        self.helper('install')
         self.helper('check')
         after = json.loads(path.read_text())
         self.assertEqual({k: v for k, v in after.items() if k != 'statusLine'}, {k: v for k, v in old.items() if k != 'statusLine'})
@@ -60,16 +60,6 @@ class ClaudeConfig(unittest.TestCase):
         state = self.home / '.local/state/agent-setup'
         self.assertEqual(json.loads((state / 'claude-usage-state.json').read_text())['five_hour_pct'], 12)
         self.assertEqual(len((state / 'usage-snapshots.jsonl').read_text().splitlines()), 1)
-
-    def test_keeper_records_reset_and_skips_active_window(self):
-        stub = self.bin / 'claude'
-        stub.write_text('#!/bin/sh\nprintf x >>"$HOME/calls"\nprintf \'%s\\n\' \'{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"resetsAt":9999999999}}}}\'\n')
-        stub.chmod(0o755)
-        for _ in range(2):
-            result = subprocess.run(['bash', str(ROOT / 'bin/claude-window-keeper')], env=self.env, capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual((self.home / 'calls').read_text(), 'x')
-        self.assertEqual((self.home / '.local/state/claude-window-keeper/resets_at').read_text().strip(), '9999999999')
 
 
 if __name__ == '__main__':

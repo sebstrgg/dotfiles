@@ -120,9 +120,9 @@ check_link "bat/config" "$HOME/.config/bat/config"
 check_link "nano/.nanorc" "$HOME/.nanorc"
 check_link "vim/.vimrc" "$HOME/.vimrc"
 [[ "$PLATFORM" == "Darwin" ]] && check_link "ghostty/config" "$HOME/.config/ghostty/config"
-hdr "Claude statusline and window keeper"
+hdr "Claude statusline"
 if [[ $FIX -eq 1 ]]; then
-    if ! python3 "$REPO_DIR/scripts/claude-config.py" install --reload; then
+    if ! python3 "$REPO_DIR/scripts/claude-config.py" install; then
         bad "could not repair Claude dotfiles"
     fi
 fi
