@@ -178,8 +178,9 @@ the Claude Code section of `tmux/tmux.conf` (passthrough and extended keys),
 `ripgrep` in the Brewfile, and the `.gitignore` rule for agent working state. The Bitwarden
 bridge (`bin/bw-bridge`, `bin/bw-vault`, `bin/bw-ssh` and the
 `bw-bridge-expire` launch agent) lets agents use the vault without seeing a
-credential; it stays here because it is tied to this machine's Keychain and
-its own Vaultwarden.
+credential. macOS uses Login Keychain; Linux uses a private expiring tmpfs
+cache shared with user services. Unlock and SSH socket setup live in the
+[Bitwarden runbook](docs/bitwarden-rbw-setup.md#wsl--linux-and-headless-agent-hosts).
 
 Agent workflows live in the private [wl7r/agent-setup](https://github.com/wl7r/agent-setup) repository.
 

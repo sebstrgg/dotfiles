@@ -1,15 +1,8 @@
 #!/bin/bash
-# Bridge an unlocked Bitwarden session into the macOS Login Keychain so
-# Codex / Claude Code can use bw-vault without seeing any credential.
-# Interactive by design: the master password goes only into bw's own prompt.
-# The session (revocable, not the master password) is passed to `security`
-# as an argument — brief ps exposure, within the same-user Keychain tradeoff
-# documented in ~/code/personal-infra/runbooks/bitwarden/access.md.
-#
-#   bw-bridge [HOURS]   unlock and keep the session for HOURS (default 12)
-#   bw-bridge expire    lock and remove the session once its time is up
-#                       (run by the com.sebastian.bw-bridge-expire agent)
+# Interactive Bitwarden unlock; cache a verified session for HOURS (default 12).
+# macOS uses Login Keychain; Linux uses the private tmpfs runtime directory.
 set -euo pipefail
+set +x
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 BW_CLI="$SCRIPT_DIR/bw-vault"
@@ -17,6 +10,10 @@ SERVICE=personal-infra-bitwarden-session
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/bw-bridge"
 EXPIRES_AT="$STATE_DIR/expires-at"
 DEFAULT_HOURS=12
+PLATFORM=$(uname -s)
+if [[ $PLATFORM == Linux ]]; then
+	export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+fi
 
 if [[ ! -x "$BW_CLI" ]]; then
 	echo "ERROR: compatible Bitwarden wrapper is missing: $BW_CLI" >&2
@@ -29,6 +26,12 @@ cached_session() {
 
 expire() {
 	local session now
+	if [[ $PLATFORM == Linux ]]; then
+		if ! "$SCRIPT_DIR/bw-session-cache" read >/dev/null; then
+			"$BW_CLI" lock >/dev/null 2>&1 || true
+		fi
+		return
+	fi
 	session="$(cached_session)" || {
 		rm -f "$EXPIRES_AT"
 		return 0
@@ -56,28 +59,46 @@ if [[ "${1:-}" == expire ]]; then
 fi
 
 hours="${1:-$DEFAULT_HOURS}"
-if [[ ! "$hours" =~ ^[1-9][0-9]*$ ]]; then
+if [[ ! "$hours" =~ ^[1-9][0-9]{0,3}$ ]]; then
 	echo "usage: bw-bridge [HOURS] | bw-bridge expire" >&2
 	exit 64
 fi
 
+[[ -t 0 ]] || {
+	echo 'ERROR: Sebastian must unlock in an interactive terminal' >&2
+	exit 1
+}
 status="$("$BW_CLI" status | jq -r .status)"
 if [[ "$status" == "unauthenticated" ]]; then
 	"$BW_CLI" login
 fi
 
 session="$("$BW_CLI" unlock --raw)"
-/usr/bin/security add-generic-password -U -a "$USER" -s "$SERVICE" -w "$session"
-unset session
-
-check="$(BW_SESSION="$(cached_session)" "$BW_CLI" status | jq -r .status)"
+check="$(BW_SESSION="$session" "$BW_CLI" status | jq -r .status)"
 if [[ "$check" != "unlocked" ]]; then
 	echo "ERROR: cached session does not unlock the vault (status: $check)" >&2
 	exit 1
 fi
 
-mkdir -p "$STATE_DIR"
 expires=$(($(date +%s) + hours * 3600))
+if [[ $PLATFORM == Linux ]]; then
+	printf '%s\n' "$session" | "$SCRIPT_DIR/bw-session-cache" store "$expires"
+	unset session
+	# Expiry on reads is authoritative even if the timer or user manager stops.
+	systemctl --user stop bw-bridge-expire.timer bw-bridge-expire.service >/dev/null 2>&1 || true
+	if ! systemd-run --user --quiet --collect --unit=bw-bridge-expire \
+		--on-active="${hours}h" --timer-property=AccuracySec=1s "$SCRIPT_DIR/bw-bridge" expire; then
+		"$SCRIPT_DIR/bw-session-cache" clear
+		"$BW_CLI" lock >/dev/null 2>&1 || true
+		echo 'ERROR: expiry timer failed; bridge closed' >&2
+		exit 1
+	fi
+	echo "OK: verified Bitwarden session cached in private runtime tmpfs for $hours hours."
+	exit 0
+fi
+/usr/bin/security add-generic-password -U -a "$USER" -s "$SERVICE" -w "$session"
+unset session
+mkdir -p "$STATE_DIR"
 echo "$expires" >"$EXPIRES_AT"
 
 echo "OK: verified Bitwarden session cached in Login Keychain ($SERVICE) until $(date -r "$expires" '+%a %H:%M')."

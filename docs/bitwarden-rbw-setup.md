@@ -15,8 +15,8 @@ Replace these angle-bracket tokens with your own values throughout:
 ## Server
 
 - URL: `<your-vaultwarden-server>`
-- Network: Tailscale-only (not reachable from the public internet)
-- Backend: Vaultwarden (self-hosted, behind Traefik IPAllowList)
+- Network: HTTPS at the configured URL; clients must resolve a reachable ingress
+- Backend: self-hosted Vaultwarden behind HTTPS ingress, with its admin path protected separately
 - SSH Key item type enabled via: `EXPERIMENTAL_CLIENT_FEATURE_FLAGS=ssh-key-vault-item,ssh-agent`
 
 **If the SSH Key item type disappears from the Vaultwarden UI after a container rebuild**, the env var was not carried over. Check the Vaultwarden container definition on your server and re-add the flag.
@@ -46,25 +46,59 @@ SSH authorization prompts auto-approve because the vault stays unlocked.
 
 Each SSH connection triggers a Bitwarden approval prompt; approve with Touch ID.
 
-### WSL / Linux
+### WSL / Linux and headless agent hosts
 
-rbw provides both a Bitwarden CLI and a built-in SSH agent that speaks the full SSH agent protocol. No ssh-add piping needed.
+Sebastian unlocks both clients himself over an SSH terminal. Neither stores
+his master password or automatically unlocks. Configure each client once:
 
 ```bash
-# Configure rbw (interactive — do not automate these)
+bw-vault config server <your-vaultwarden-server>
 rbw config set email <your-email>
 rbw config set base_url <your-vaultwarden-server>
 rbw config set pinentry pinentry-curses
-
-# Authenticate and unlock
-rbw login           # enter master password via pinentry
-rbw unlock          # starts rbw-agent; SSH keys become available
-
-# Verify
-ssh-add -L          # should list your vault SSH keys
+rbw config set lock_timeout 43200
+rbw login
 ```
 
-The `.zshrc` SSH_AUTH_SOCK block picks up the rbw socket automatically after `rbw unlock`. See `rbw/config.json.example` for a reference config (copy to `~/.config/rbw/config.json` and edit the email field).
+For each working session, in the SSH terminal:
+
+```bash
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export GPG_TTY="$(tty)"
+bw-bridge       # interactive CLI login/unlock; default 12 hours
+rbw unlock      # separate interactive unlock for SSH keys
+ln -sfn "$XDG_RUNTIME_DIR/rbw/ssh-agent-socket" "$HOME/.bitwarden-ssh-agent.sock"
+export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
+bw-vault status # reports unlocked, without printing the session
+ssh-add -l      # fingerprints only
+```
+
+`bw-bridge HOURS` changes the CLI cache lifetime. Set rbw's `lock_timeout`
+separately to the desired number of seconds. The socket symlink survives
+reboots; the socket and both unlocks do not. Set the T3 user service's
+`SSH_AUTH_SOCK=%h/.bitwarden-ssh-agent.sock` and include `%h/.local/bin` in
+its PATH; shell initialization alone does not configure systemd services.
+Never replace an existing socket or file at that path without inspecting it.
+
+The Linux CLI session lives in `$XDG_RUNTIME_DIR/bw-bridge/session` (0600,
+private 0700 directory). The bridge requires an owned 0700 runtime directory
+on tmpfs and falls back to `/run/user/UID` when SSH omits the variable.
+This shares one explicit unlock with non-interactive systemd user services,
+without relying on SSH's session keyring. tmpfs can be swapped; encrypted swap
+or disabled swap is a host concern. Processes running as the same user and
+root can read this session; it is not isolation from those processes.
+
+Every cache read checks expiry; a transient systemd user timer also locks the
+CLI and removes expired state. Timer creation failure closes the bridge.
+`bw-vault` loads this cache automatically on Linux. The narrow `bin/security`
+adapter supports only the infrastructure Tools' exact session read/delete
+calls and forwards unchanged to Apple's tool on macOS. It never supports
+storing credentials through command arguments. Keep the helpers together on
+PATH. The macOS-only `bw-ssh` helper still uses Apple's absolute tool path.
+
+Close early with `tools/access/bitwarden-session close` in personal-infra,
+and `rbw lock` for SSH keys. Agents never invoke interactive `bw-bridge` or
+`rbw unlock`. Linux regression: `bash tests/bw-bridge.test.sh`.
 
 ---
 
