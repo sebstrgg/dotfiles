@@ -65,7 +65,7 @@ if [[ ! "$hours" =~ ^[1-9][0-9]{0,3}$ ]]; then
 fi
 
 [[ -t 0 ]] || {
-	echo 'ERROR: Sebastian must unlock in an interactive terminal' >&2
+	echo 'ERROR: unlock from an interactive terminal; automation never unlocks' >&2
 	exit 1
 }
 status="$("$BW_CLI" status | jq -r .status)"

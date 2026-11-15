@@ -48,7 +48,7 @@ Each SSH connection triggers a Bitwarden approval prompt; approve with Touch ID.
 
 ### WSL / Linux and headless agent hosts
 
-Sebastian unlocks both clients himself over an SSH terminal. Neither stores
+The vault owner unlocks both clients over an SSH terminal. Neither stores
 his master password or automatically unlocks. Configure each client once:
 
 ```bash
