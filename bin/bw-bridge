@@ -85,10 +85,11 @@ fi
 
 expires=$(($(date +%s) + hours * 3600))
 if [[ $PLATFORM == Linux ]]; then
-	printf '%s\n' "$session" | "$SCRIPT_DIR/bw-session-cache" store "$expires"
-	unset session
+	# Stop the previous timer first so it cannot close the session stored next.
 	# Expiry on reads is authoritative even if the timer or user manager stops.
 	systemctl --user stop bw-bridge-expire.timer bw-bridge-expire.service >/dev/null 2>&1 || true
+	printf '%s\n' "$session" | "$SCRIPT_DIR/bw-session-cache" store "$expires"
+	unset session
 	if ! systemd-run --user --quiet --collect --unit=bw-bridge-expire \
 		--on-active="${hours}h" --timer-property=AccuracySec=1s "$SCRIPT_DIR/bw-bridge" expire; then
 		"$SCRIPT_DIR/bw-session-cache" clear
