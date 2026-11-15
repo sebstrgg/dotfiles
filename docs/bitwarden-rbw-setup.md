@@ -66,19 +66,24 @@ For each working session, in the SSH terminal:
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 export GPG_TTY="$(tty)"
 bw-bridge       # interactive CLI login/unlock; default 12 hours
-rbw unlock      # separate interactive unlock for SSH keys
-ln -sfn "$XDG_RUNTIME_DIR/rbw/ssh-agent-socket" "$HOME/.bitwarden-ssh-agent.sock"
-export SSH_AUTH_SOCK="$HOME/.bitwarden-ssh-agent.sock"
 bw-vault status # reports unlocked, without printing the session
+```
+
+`bw-bridge` is the only unlock agents need: they read the vault through
+`bw-vault`, use git over HTTPS and reach servers over Tailscale SSH, so they
+use no SSH keys. Unlock rbw only when you want vault SSH keys in your own
+session:
+
+```bash
+rbw unlock      # optional: SSH keys for interactive use
+export SSH_AUTH_SOCK="$XDG_RUNTIME_DIR/rbw/ssh-agent-socket"
 ssh-add -l      # fingerprints only
 ```
 
-`bw-bridge HOURS` changes the CLI cache lifetime. Set rbw's `lock_timeout`
-separately to the desired number of seconds. The socket symlink survives
-reboots; the socket and both unlocks do not. Set the T3 user service's
-`SSH_AUTH_SOCK=%h/.bitwarden-ssh-agent.sock` and include `%h/.local/bin` in
-its PATH; shell initialization alone does not configure systemd services.
-Never replace an existing socket or file at that path without inspecting it.
+`bw-bridge HOURS` changes the CLI cache lifetime; rbw's `lock_timeout` is
+separate, in seconds. Neither unlock survives a reboot. Include `%h/.local/bin`
+in the T3 user service's PATH; shell initialization alone does not configure
+systemd services.
 
 The Linux CLI session lives in `$XDG_RUNTIME_DIR/bw-bridge/session` (0600,
 private 0700 directory). The bridge requires an owned 0700 runtime directory
