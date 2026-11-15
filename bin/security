@@ -1,0 +1,22 @@
+#!/bin/bash
+# Preserve infrastructure Tools' Keychain read/delete interface on Linux.
+# No general Keychain emulation and no credentials accepted in argv.
+set -euo pipefail
+set +x
+if [[ $(uname -s) == Darwin ]]; then exec /usr/bin/security "$@"; fi
+command=${1:-}
+shift || exit 64
+[[ ${1:-} == -a && ${2:-} == "$(id -un)" && ${3:-} == -s && ${4:-} == personal-infra-bitwarden-session ]] || exit 64
+shift 4
+cache=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bw-session-cache
+case $command in
+find-generic-password)
+	[[ $# == 1 && $1 == -w ]] || exit 64
+	exec "$cache" read
+	;;
+delete-generic-password)
+	[[ $# == 0 ]] || exit 64
+	exec "$cache" clear
+	;;
+*) exit 64 ;;
+esac

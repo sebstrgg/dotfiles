@@ -1,0 +1,47 @@
+#!/bin/bash
+# Linux-only bridge storage. Never call read from an interactive terminal:
+# stdout is a session credential intended only for a consuming process.
+set -euo pipefail
+set +x
+umask 077
+runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+fail() {
+	echo 'bw-session-cache: unavailable or unsafe runtime cache' >&2
+	exit 1
+}
+[[ $runtime == /* && ! -L $runtime && -d $runtime && -O $runtime ]] || fail
+[[ $(stat -c %a "$runtime") == 700 && $(stat -f -c %T "$runtime") == tmpfs ]] || fail
+cache_dir=$runtime/bw-bridge
+[[ ! -L $cache_dir ]] || fail
+mkdir -p "$cache_dir"
+[[ -O $cache_dir && $(stat -c %a "$cache_dir") == 700 ]] || fail
+cache=$cache_dir/session
+case ${1:-} in
+read)
+	[[ -f $cache && ! -L $cache && -O $cache && $(stat -c %a "$cache") == 600 ]] || exit 1
+	{
+		IFS= read -r expires
+		IFS= read -r session
+	} <"$cache" || fail
+	[[ $expires =~ ^[0-9]{1,12}$ && -n $session ]] || fail
+	if (($(date +%s) >= 10#$expires)); then
+		rm -f "$cache"
+		exit 1
+	fi
+	printf '%s\n' "$session"
+	;;
+store)
+	[[ ${2:-} =~ ^[0-9]{1,12}$ ]] || fail
+	IFS= read -r session
+	[[ -n $session ]] || fail
+	temp=$(mktemp "$cache_dir/.session.XXXXXX")
+	trap 'rm -f "$temp"' EXIT
+	printf '%s\n%s\n' "$2" "$session" >"$temp"
+	mv -f "$temp" "$cache"
+	;;
+clear) rm -f "$cache" ;;
+*)
+	echo 'usage: bw-session-cache read|clear|store EPOCH' >&2
+	exit 64
+	;;
+esac
