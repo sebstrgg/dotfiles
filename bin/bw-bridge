@@ -27,9 +27,12 @@ cached_session() {
 expire() {
 	local session now
 	if [[ $PLATFORM == Linux ]]; then
-		if ! "$SCRIPT_DIR/bw-session-cache" read >/dev/null; then
-			"$BW_CLI" lock >/dev/null 2>&1 || true
-		fi
+		# Re-bridging replaces the timer, so a firing timer always ends the
+		# current bridge: close it regardless of the wall clock. Failures go
+		# to stderr, which the transient unit sends to the journal.
+		"$SCRIPT_DIR/bw-session-cache" clear || echo 'bw-bridge: cache clear failed' >&2
+		"$BW_CLI" lock >/dev/null || echo 'bw-bridge: bw lock failed' >&2
+		echo "bw-bridge: session expired and closed"
 		return
 	fi
 	session="$(cached_session)" || {

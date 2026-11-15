@@ -38,6 +38,16 @@ if "$root/bin/security" find-generic-password -a other-user -s personal-infra-bi
 "$root/bin/security" delete-generic-password -a "$(id -un)" -s personal-infra-bitwarden-session
 [[ $("$root/bin/bw-vault" status | jq -r .status) == locked ]]
 echo 'PASS: CLI and infrastructure compatibility share the expiring cache'
+printf 'fixture-session\n' | "$cache" store "$(($(date +%s) + 3600))"
+cat >"$fixture/stubs/npx" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >>"${XDG_RUNTIME_DIR}/npx.log"
+echo '{"status":"locked"}'
+STUB
+"$root/bin/bw-bridge" expire >/dev/null
+[[ ! -e $fixture/bw-bridge/session ]]
+grep -q 'lock' "$fixture/npx.log"
+echo 'PASS: a firing expiry timer closes an unexpired bridge'
 ln -s "$fixture/stubs/npx" "$fixture/bw-bridge/session"
 if "$cache" read >/dev/null 2>&1; then exit 1; fi
 chmod 755 "$fixture"
