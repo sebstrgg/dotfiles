@@ -58,7 +58,10 @@ pruning is skipped if that tool or a responsive daemon is unavailable.
 
 The Kimsufi `tools/dev-clean.sh`, its worktree variants, and identical copies are
 skipped because it also deletes protected scratch data and worktrees; its Rust
-target is handled directly. Agent databases,
+target and named `target-*` outputs with Cargo cache markers are handled directly.
+Disk pressure can require removing several small outputs; no per-directory size
+floor prevents reaching the low-water mark. Targets in use or with failed open-file
+inspection stay. Agent databases,
 Docker volumes, CoreSimulator, and project sources are excluded. Registered secondary
 worktrees may lose ignored `api/.venv`, `web/node_modules` and `web/.next` only after
 six hours without writes or recent T3 activity, with fresh build and open-handle

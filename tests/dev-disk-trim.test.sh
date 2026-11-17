@@ -50,7 +50,7 @@ lsof)
 du)
 	path=${*: -1}
 	case "$path" in
-	*/target) printf '7340032\t%s\n' "$path" ;;
+	*/target) printf '1024\t%s\n' "$path" ;;
 	*/.npm) printf '2097152\t%s\n' "$path" ;;
 	*) printf '1\t%s\n' "$path" ;;
 	esac
@@ -87,31 +87,66 @@ new_home() {
 	HOME="$workspace/$1"
 	export HOME
 	mkdir -p "$HOME/.cache/project/target" "$HOME/.npm"
+	printf '{}\n' >"$HOME/.cache/project/target/.rustc_info.json"
+	printf 'Signature: 8a477f597d28d172789f06886806bc55\n' >"$HOME/.cache/project/target/CACHEDIR.TAG"
 	unset TEST_USE TEST_BUSY_STATUS TEST_BUSY_COMMAND TEST_EARLY TEST_DOCKER_STATUS TEST_DOCKER_HANG TEST_LSOF TEST_TMP TEST_COLD
 }
 
 new_home below
 export TEST_USE=70
 trim >"$HOME/output"
-[[ -d $HOME/.cache/project/target && ! -e $HOME/cache-calls && ! -e $HOME/docker-calls ]]
-[[ $(wc -l <"$HOME/output") -eq 1 ]]
+[[ -d $HOME/.cache/project/target && ! -e $HOME/cache-calls && ! -e $HOME/docker-calls ]] || exit 1
+[[ $(wc -l <"$HOME/output") -eq 1 ]] || exit 1
 printf 'PASS: below threshold leaves data and caches alone\n'
 
 new_home busy
 export TEST_BUSY_STATUS=0
 trim >"$HOME/output"
-[[ -d $HOME/.cache/project/target && -e $HOME/cache-calls ]]
+[[ -d $HOME/.cache/project/target && -e $HOME/cache-calls ]] || exit 1
 printf 'PASS: cargo build keeps target while caches are trimmed\n'
 
 new_home idle
 trim >"$HOME/output"
-[[ ! -e $HOME/.cache/project/target ]]
-printf 'PASS: idle target over 6 GiB is removed\n'
+[[ ! -e $HOME/.cache/project/target ]] || exit 1
+printf 'PASS: idle target below 6 GiB is removed under disk pressure\n'
+
+new_home non-cargo-target
+rm "$HOME/.cache/project/target/.rustc_info.json" "$HOME/.cache/project/target/CACHEDIR.TAG"
+printf 'untracked work\n' >"$HOME/.cache/project/target/notes"
+trim >"$HOME/output"
+[[ -f $HOME/.cache/project/target/notes ]] || exit 1
+printf 'PASS: small non-Cargo target is preserved\n'
+
+new_home named-targets
+for name in target-ladder target-sale-status-sol; do
+	mkdir -p "$HOME/.cache/project/$name/debug"
+	printf '{}\n' >"$HOME/.cache/project/$name/.rustc_info.json"
+	printf 'Signature: 8a477f597d28d172789f06886806bc55\n' >"$HOME/.cache/project/$name/CACHEDIR.TAG"
+done
+mkdir -p "$HOME/.cache/project/target-not-cargo" "$HOME/.cache/project/scratch"
+printf 'keep\n' >"$HOME/.cache/project/scratch/evidence"
+trim >"$HOME/output"
+[[ ! -e $HOME/.cache/project/target-ladder && ! -e $HOME/.cache/project/target-sale-status-sol ]] || exit 1
+[[ -d $HOME/.cache/project/target-not-cargo && -f $HOME/.cache/project/scratch/evidence ]] || exit 1
+printf 'PASS: named Cargo targets are trimmed; unrecognized outputs and scratch stay\n'
+
+new_home target-in-use
+export TEST_TMP="$HOME/.cache/project/target" TEST_LSOF=used
+trim >"$HOME/output"
+[[ -d $HOME/.cache/project/target ]] || exit 1
+jq -e 'select(.action == "rust_target" and .status == "in_use_or_inspection_failed")' "$HOME/output" >/dev/null
+printf 'PASS: an open target is preserved\n'
+
+new_home target-inspection-error
+export TEST_LSOF=error
+trim >"$HOME/output"
+[[ -d $HOME/.cache/project/target ]] || exit 1
+printf 'PASS: failed open-file inspection preserves targets\n'
 
 new_home docker-down
 export TEST_DOCKER_STATUS=1
 trim >"$HOME/output"
-[[ ! -e $HOME/docker-calls ]]
+[[ ! -e $HOME/docker-calls ]] || exit 1
 jq -e 'select(.action == "docker" and .status == "unavailable")' "$HOME/output" >/dev/null
 printf 'PASS: unavailable Docker daemon skips pruning without failure\n'
 
@@ -121,9 +156,9 @@ for mode in used used-alias error idle; do
 	touch -t 202001010000 "$tmp_fixture"
 	trim >"$HOME/output"
 	if [[ $mode == idle ]]; then
-		[[ ! -e $tmp_fixture ]]
+		[[ ! -e $tmp_fixture ]] || exit 1
 	else
-		[[ -d $tmp_fixture ]]
+		[[ -d $tmp_fixture ]] || exit 1
 	fi
 	printf 'PASS: temp directory with lsof %s handled safely\n' "$mode"
 done
@@ -131,8 +166,8 @@ done
 new_home early
 export TEST_BUSY_STATUS=0 TEST_EARLY=1
 trim >"$HOME/output"
-[[ -d $HOME/.cache/project/target && ! -e $HOME/docker-calls ]]
-[[ $(wc -l <"$HOME/cache-calls") -eq 1 ]]
+[[ -d $HOME/.cache/project/target && ! -e $HOME/docker-calls ]] || exit 1
+[[ $(wc -l <"$HOME/cache-calls") -eq 1 ]] || exit 1
 jq -e 'select(.action == "final" and .target == "80.00% -> 60.00%")' "$HOME/output" >/dev/null
 printf 'PASS: stops immediately when cache trimming reaches 67 percent\n'
 
@@ -140,23 +175,23 @@ new_home browsers
 mkdir -p "$HOME/Library/Caches/ms-playwright/"{chromium-9,chromium-100,firefox-2,firefox-8,chromium_headless_shell-1,chromium_headless_shell-2,unknown}
 trim >"$HOME/output"
 for family in chromium-100 firefox-8 chromium_headless_shell-2 unknown; do
-	[[ -d $HOME/Library/Caches/ms-playwright/$family ]]
+	[[ -d $HOME/Library/Caches/ms-playwright/$family ]] || exit 1
 done
 for family in chromium-9 firefox-2 chromium_headless_shell-1; do
-	[[ ! -e $HOME/Library/Caches/ms-playwright/$family ]]
+	[[ ! -e $HOME/Library/Caches/ms-playwright/$family ]] || exit 1
 done
 printf 'PASS: keeps newest numeric revision per browser family\n'
 
 new_home inspection-error
 export TEST_BUSY_STATUS=2
 trim >"$HOME/output"
-[[ -d $HOME/.cache/project/target && -e $HOME/cache-calls ]]
+[[ -d $HOME/.cache/project/target && -e $HOME/cache-calls ]] || exit 1
 printf 'PASS: pgrep errors keep build output but allow cache trimming\n'
 
 new_home dry-run
 export TEST_USE=50
 trim --dry-run --force >"$HOME/output"
-[[ -d $HOME/.cache/project/target && ! -e $HOME/cache-calls && ! -e $HOME/docker-calls ]]
+[[ -d $HOME/.cache/project/target && ! -e $HOME/cache-calls && ! -e $HOME/docker-calls ]] || exit 1
 jq -e 'select(.action == "rust_target" and .status == "would_remove")' "$HOME/output" >/dev/null
 printf 'PASS: forced dry run below threshold reports without deletion\n'
 
@@ -166,9 +201,9 @@ ln -s "$HOME/.codex" "$HOME/.cache/linked"
 mkdir -p "$HOME/.cache/codex-runtimes/"{codex-runtime-install-old,codex-runtime-install-new}
 touch -t 202001010000 "$HOME/.cache/codex-runtimes/codex-runtime-install-old"
 trim >"$HOME/output"
-[[ -d $HOME/.codex/target && -d $HOME/.t3 && -L $HOME/.cache/linked ]]
-[[ -d $HOME/.cache/kimsufi-hunter/private && -d $HOME/.cache/kimsufi-hunter/codex && -d $HOME/.cache/kimsufi-hunter/scratch ]]
-[[ ! -e $HOME/.cache/codex-runtimes/codex-runtime-install-old && -d $HOME/.cache/codex-runtimes/codex-runtime-install-new ]]
+[[ -d $HOME/.codex/target && -d $HOME/.t3 && -L $HOME/.cache/linked ]] || exit 1
+[[ -d $HOME/.cache/kimsufi-hunter/private && -d $HOME/.cache/kimsufi-hunter/codex && -d $HOME/.cache/kimsufi-hunter/scratch ]] || exit 1
+[[ ! -e $HOME/.cache/codex-runtimes/codex-runtime-install-old && -d $HOME/.cache/codex-runtimes/codex-runtime-install-new ]] || exit 1
 printf 'PASS: protected paths and symlink targets kept; only stale runtime removed\n'
 
 new_home rotation
@@ -178,7 +213,7 @@ for ((i = 0; i < 15000; i++)); do
 done >"$HOME/Library/Logs/dev-disk-trim.log"
 export TEST_USE=50
 trim >"$HOME/output"
-[[ $(wc -c <"$HOME/Library/Logs/dev-disk-trim.log") -lt 1048576 ]]
+[[ $(wc -c <"$HOME/Library/Logs/dev-disk-trim.log") -lt 1048576 ]] || exit 1
 jq -e -s '.[-1].action == "threshold"' "$HOME/Library/Logs/dev-disk-trim.log" >/dev/null
 printf 'PASS: log rotation preserves complete JSON lines below 1 MiB\n'
 
@@ -189,7 +224,7 @@ for command in cargo rustc cargo-nextest clippy-driver rustdoc 'npm ci' 'npm ins
 	new_home command
 	export TEST_BUSY_COMMAND="$command" TEST_EARLY=1
 	trim >"$HOME/output"
-	[[ -d $HOME/.cache/project/target && -e $HOME/cache-calls ]]
+	[[ -d $HOME/.cache/project/target && -e $HOME/cache-calls ]] || exit 1
 done
 printf 'PASS: Rust, npm, Playwright, uv and Docker command forms keep targets\n'
 
@@ -210,7 +245,7 @@ git -C "$HOME/code/kimsufi" -c user.name=Test -c user.email=test@example.invalid
 git -C "$HOME/code/kimsufi" worktree add -q -b fixture "$HOME/code/kimsufi-worktree"
 printf '# worktree variant\n' >>"$HOME/code/kimsufi-worktree/tools/dev-clean.sh"
 trim >"$HOME/output"
-[[ -d $HOME/.cache/kimsufi-hunter/scratch ]]
+[[ -d $HOME/.cache/kimsufi-hunter/scratch ]] || exit 1
 jq -e 'select(.action == "dev_clean" and .status == "unsafe_path")' "$HOME/output" >/dev/null
 git -C "$HOME/code/kimsufi-worktree" restore tools/dev-clean.sh
 git -C "$HOME/code/kimsufi" worktree remove "$HOME/code/kimsufi-worktree"
@@ -222,7 +257,7 @@ new_home docker-hung
 export TEST_DOCKER_HANG=1
 started=$SECONDS
 trim >"$HOME/output"
-[[ ! -e $HOME/docker-calls && $((SECONDS - started)) -lt 20 ]]
+[[ ! -e $HOME/docker-calls && $((SECONDS - started)) -lt 20 ]] || exit 1
 jq -e 'select(.action == "final")' "$HOME/output" >/dev/null
 printf 'PASS: hung Docker probe times out and cleanup completes\n'
 
@@ -243,8 +278,8 @@ rm -rf "$HOME/code/app-lane/web/node_modules" "$HOME/code/app-lane/api/.venv"
 ln -s ../../app-base/web/node_modules "$HOME/code/app-lane/web/node_modules"
 ln -s ../../app-base/api/.venv "$HOME/code/app-lane/api/.venv"
 trim >"$HOME/output"
-[[ -d $HOME/code/app-base/web/node_modules/pkg && -d $HOME/code/app-base/api/.venv/bin ]]
-[[ -L $HOME/code/app-lane/web/node_modules && -L $HOME/code/app-lane/api/.venv ]]
-[[ ! -e $HOME/code/app-idle/web/node_modules && ! -e $HOME/code/app-idle/api/.venv ]]
+[[ -d $HOME/code/app-base/web/node_modules/pkg && -d $HOME/code/app-base/api/.venv/bin ]] || exit 1
+[[ -L $HOME/code/app-lane/web/node_modules && -L $HOME/code/app-lane/api/.venv ]] || exit 1
+[[ ! -e $HOME/code/app-idle/web/node_modules && ! -e $HOME/code/app-idle/api/.venv ]] || exit 1
 jq -e 'select(.action == "worktree_cache" and .status == "linked_from_other_checkout")' "$HOME/output" >/dev/null
 printf 'PASS: idle worktree caches are trimmed; caches other checkouts link to are kept\n'
