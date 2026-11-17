@@ -132,6 +132,24 @@ remove_dir() {
 	checkpoint
 }
 
+unused() {
+	local dir=$1
+	# A global scan succeeds even with no files in this tree (lsof +D returns 1).
+	# Default lsof output includes cwd and open files; warnings also fail closed.
+	[[ $dir != *[[:cntrl:]]* && $dir != *\\* ]] || return 1
+	if ! lsof -nP -F n >"$lock.lsof" 2>"$lock.stderr" || [[ -s $lock.stderr ]]; then
+		return 1
+	fi
+	awk -v tree="$dir" '
+		/^n/ {
+			path=substr($0,2)
+			# macOS lsof can retain the /tmp symlink spelling for open files.
+			sub(/^\/tmp(\/|$)/, "/private/tmp/", path)
+			if (path == tree || index(path,tree "/") == 1) found=1
+		}
+		END {exit found ? 1 : 0}' "$lock.lsof"
+}
+
 # Build-output stages are skipped together, and checked again before each trim.
 if building; then
 	log build_output busy
@@ -163,12 +181,22 @@ else
 		fi
 		checkpoint
 	done
-	for target in "$HOME"/.cache/*/target "$HOME"/code/*/target; do
+	for target in "$HOME"/.cache/*/target "$HOME"/.cache/*/target-* "$HOME"/code/*/target; do
 		safe_dir "$target" || continue
-		size_over "$target" 6291456 || continue
+		# Named Cargo outputs share the same cache parent; scratch siblings stay.
+		[[ -f $target/.rustc_info.json && ! -L $target/.rustc_info.json ]] || continue
+		[[ -f $target/CACHEDIR.TAG && ! -L $target/CACHEDIR.TAG ]] || continue
+		[[ $(head -n 1 "$target/CACHEDIR.TAG") == 'Signature: 8a477f597d28d172789f06886806bc55' ]] || continue
+		if [[ ${target##*/} == target-* ]]; then
+			git -C "$target" rev-parse --is-inside-work-tree >/dev/null 2>&1 && continue
+		fi
 		if building; then
 			log rust_target busy "$target"
 			break
+		fi
+		if ! unused "$target"; then
+			log rust_target in_use_or_inspection_failed "$target"
+			continue
 		fi
 		if [[ $target == "$HOME/code/"* ]]; then
 			tracked=$(git -C "${target%/target}" ls-files -- target 2>/dev/null) || continue
@@ -177,6 +205,10 @@ else
 		if $dry_run; then
 			log rust_target would_remove "$target"
 		else
+			if building; then
+				log rust_target busy "$target"
+				break
+			fi
 			# Move away first: a subsequent build creates a fresh target directory.
 			tombstone=$(mktemp -d "${target%/*}/.dev-disk-trim.XXXXXX")
 			if mv "$target" "$tombstone/target"; then
@@ -209,24 +241,6 @@ old_enough() {
 	local modified
 	modified=$(stat -f %m "$1" 2>/dev/null) || return 1
 	[[ $modified =~ ^[0-9]+$ ]] && (($(date +%s) - modified > $2))
-}
-
-unused() {
-	local dir=$1
-	# A global scan succeeds even with no files in this tree (lsof +D returns 1).
-	# Default lsof output includes cwd and open files; warnings also fail closed.
-	[[ $dir != *[[:cntrl:]]* && $dir != *\\* ]] || return 1
-	if ! lsof -nP -F n >"$lock.lsof" 2>"$lock.stderr" || [[ -s $lock.stderr ]]; then
-		return 1
-	fi
-	awk -v tree="$dir" '
-		/^n/ {
-			path=substr($0,2)
-			# macOS lsof can retain the /tmp symlink spelling for open files.
-			sub(/^\/tmp(\/|$)/, "/private/tmp/", path)
-			if (path == tree || index(path,tree "/") == 1) found=1
-		}
-		END {exit found ? 1 : 0}' "$lock.lsof"
 }
 
 cache_cold() {
