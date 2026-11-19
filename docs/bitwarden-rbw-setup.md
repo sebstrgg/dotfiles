@@ -95,7 +95,8 @@ root can read this session; it is not isolation from those processes.
 
 Every cache read checks expiry; a transient systemd user timer also locks the
 CLI and removes expired state. Timer creation failure closes the bridge.
-`bw-vault` loads this cache automatically on Linux. The narrow `bin/security`
+`bw-vault` loads this cache automatically on Linux, and on macOS the Login
+Keychain session until the expiry `bw-bridge` recorded. The narrow `bin/security`
 adapter supports only the infrastructure Tools' exact session read/delete
 calls and forwards unchanged to Apple's tool on macOS. It never supports
 storing credentials through command arguments. Keep the helpers together on

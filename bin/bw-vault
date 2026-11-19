@@ -8,10 +8,24 @@
 set -euo pipefail
 set +x
 
-# Load only on Linux; explicit sessions are used for bridge verification.
-if [[ $(uname -s) == Linux && ! ${BW_SESSION+x} ]]; then
-	cache=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bw-session-cache
-	BW_SESSION=$("$cache" read 2>/dev/null) || BW_SESSION=
+# Use the session bw-bridge cached, unless the caller passes one (bridge
+# verification does): Linux reads the expiring runtime cache, macOS the Login
+# Keychain until the expiry bw-bridge recorded beside it.
+if [[ ! ${BW_SESSION+x} ]]; then
+	BW_SESSION=
+	case $(uname -s) in
+	Linux)
+		cache=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bw-session-cache
+		BW_SESSION=$("$cache" read 2>/dev/null) || BW_SESSION=
+		;;
+	Darwin)
+		expires=$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/bw-bridge/expires-at" 2>/dev/null) || expires=
+		if [[ $expires =~ ^[0-9]{1,12}$ ]] && (($(date +%s) < 10#$expires)); then
+			BW_SESSION=$(/usr/bin/security find-generic-password -a "$USER" \
+				-s personal-infra-bitwarden-session -w 2>/dev/null) || BW_SESSION=
+		fi
+		;;
+	esac
 	export BW_SESSION
 fi
 
