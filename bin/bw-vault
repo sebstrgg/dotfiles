@@ -19,8 +19,8 @@ if [[ ! ${BW_SESSION+x} ]]; then
 		BW_SESSION=$("$cache" read 2>/dev/null) || BW_SESSION=
 		;;
 	Darwin)
-		expires_at=${XDG_STATE_HOME:-$HOME/.local/state}/bw-bridge/expires-at
-		if [[ -f $expires_at ]] && (($(date +%s) < $(<"$expires_at"))); then
+		expires=$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/bw-bridge/expires-at" 2>/dev/null) || expires=
+		if [[ $expires =~ ^[0-9]{1,12}$ ]] && (($(date +%s) < 10#$expires)); then
 			BW_SESSION=$(/usr/bin/security find-generic-password -a "$USER" \
 				-s personal-infra-bitwarden-session -w 2>/dev/null) || BW_SESSION=
 		fi
