@@ -182,7 +182,10 @@ the Claude Code section of `tmux/tmux.conf` (passthrough and extended keys),
 bridge (`bin/bw-bridge`, `bin/bw-vault`, `bin/bw-ssh` and the
 `bw-bridge-expire` launch agent) lets agents use the vault without seeing a
 credential. macOS uses Login Keychain; Linux uses a private expiring tmpfs
-cache shared with user services. Unlock and SSH socket setup live in the
+cache shared with user services. `bin/bw-agent` runs a separate agent
+identity that unlocks unattended and sees only the collections it was granted
+([agent identity](docs/bitwarden-rbw-setup.md#agent-identity-bw-agent)).
+Unlock and SSH socket setup live in the
 [Bitwarden runbook](docs/bitwarden-rbw-setup.md#wsl--linux-and-headless-agent-hosts).
 
 Agent workflows live in the private [wl7r/agent-setup](https://github.com/wl7r/agent-setup) repository.

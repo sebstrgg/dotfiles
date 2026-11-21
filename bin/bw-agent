@@ -1,0 +1,198 @@
+#!/bin/bash
+# Run the Bitwarden CLI as this host's agent identity, unlocking unattended.
+#
+# The agent identity is a vault user that sees only the collections it was
+# granted. Its API key and master password live in this host's own secret
+# store (macOS Login Keychain; Linux systemd-creds bound to this host and
+# user). It runs in its own CLI profile, so the owner's bw-bridge session is
+# never read or changed. Values never enter argv, stdout or logs.
+#
+#   bw-agent <bw arguments>   e.g. bw-agent get password <item-id>
+#   bw-agent provision        store {server,client_id,client_secret,password} JSON from stdin
+#   bw-agent revoke           leave every organization: cuts access on all hosts at once
+#   bw-agent forget           log out and remove this host's stored identity
+set -euo pipefail
+set +x
+umask 077
+
+bin=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+platform=$(uname -s)
+state=${XDG_STATE_HOME:-$HOME/.local/state}/bw-agent
+config=${XDG_CONFIG_HOME:-$HOME/.config}/bw-agent
+export BITWARDENCLI_APPDATA_DIR=$state/cli
+unset BW_CLIENTID BW_CLIENTSECRET BW_PASSWORD
+# An empty, set BW_SESSION keeps bw-vault from loading the owner's bridge session.
+export BW_SESSION=
+readonly CREDS=bw-agent-credentials SESSION=bw-agent-session
+
+fail() {
+	echo "bw-agent: $1" >&2
+	exit 1
+}
+
+# macOS Keychain writes go through `security -i` so values stay out of argv.
+keychain_store() {
+	local encoded
+	encoded=$(base64 | tr -d '\n')
+	printf 'add-generic-password -U -a %s -s %s -w %s\n' "$USER" "$1" "$encoded" |
+		/usr/bin/security -i >/dev/null
+}
+keychain_read() {
+	/usr/bin/security find-generic-password -a "$USER" -s "$1" -w 2>/dev/null | base64 -d
+}
+keychain_delete() {
+	/usr/bin/security delete-generic-password -a "$USER" -s "$1" >/dev/null 2>&1 || true
+}
+
+runtime_dir() {
+	local runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+	[[ $runtime == /* && ! -L $runtime && -d $runtime && -O $runtime ]] || return 1
+	[[ $(stat -c %a "$runtime") == 700 && $(stat -f -c %T "$runtime") == tmpfs ]] || return 1
+	mkdir -p "$runtime/bw-agent"
+	[[ ! -L $runtime/bw-agent && -O $runtime/bw-agent && $(stat -c %a "$runtime/bw-agent") == 700 ]] || return 1
+	printf '%s\n' "$runtime/bw-agent"
+}
+
+creds_store() {
+	if [[ $platform == Darwin ]]; then
+		keychain_store "$CREDS"
+	else
+		mkdir -p "$config"
+		systemd-creds --user encrypt --name="$CREDS" - "$config/credentials.cred" >/dev/null
+	fi
+}
+creds_read() {
+	if [[ $platform == Darwin ]]; then
+		keychain_read "$CREDS"
+	else
+		[[ -f $config/credentials.cred ]] || return 1
+		systemd-creds --user decrypt --name="$CREDS" "$config/credentials.cred" - 2>/dev/null
+	fi
+}
+
+session_store() {
+	local dir
+	if [[ $platform == Darwin ]]; then
+		keychain_store "$SESSION"
+	else
+		dir=$(runtime_dir) || fail 'unsafe runtime directory'
+		cat >"$dir/session"
+		chmod 600 "$dir/session"
+	fi
+}
+session_read() {
+	local dir
+	if [[ $platform == Darwin ]]; then
+		keychain_read "$SESSION"
+	else
+		dir=$(runtime_dir) || return 1
+		[[ -f $dir/session && ! -L $dir/session && -O $dir/session && $(stat -c %a "$dir/session") == 600 ]] || return 1
+		cat "$dir/session"
+	fi
+}
+session_clear() {
+	local dir
+	if [[ $platform == Darwin ]]; then
+		keychain_delete "$SESSION"
+	elif dir=$(runtime_dir); then
+		rm -f "$dir/session"
+	fi
+}
+
+cli() { "$bin/bw-vault" "$@"; }
+
+unlocked() {
+	[[ -n ${BW_SESSION:-} ]] && [[ $(cli status 2>/dev/null | jq -r .status) == unlocked ]]
+}
+
+# One unlock at a time per host; parallel agents wait for it and reuse it.
+with_lock() {
+	local lock=$state/lock tries=0
+	mkdir -p "$state"
+	until mkdir "$lock" 2>/dev/null; do
+		if [[ -n $(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null) ]]; then rmdir "$lock" 2>/dev/null || true; fi
+		((++tries < 120)) || fail 'timed out waiting for another unlock'
+		sleep 0.5
+	done
+	trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+	"$@"
+	rmdir "$lock" 2>/dev/null || true
+	trap - EXIT
+}
+
+unlock() {
+	BW_SESSION=$(session_read 2>/dev/null) || BW_SESSION=
+	export BW_SESSION
+	unlocked && return 0
+	local creds
+	creds=$(creds_read) || fail 'no identity stored on this host; see the vault runbook to provision it'
+	export BW_CLIENTID BW_CLIENTSECRET BW_PASSWORD
+	BW_CLIENTID=$(jq -r .client_id <<<"$creds")
+	BW_CLIENTSECRET=$(jq -r .client_secret <<<"$creds")
+	BW_PASSWORD=$(jq -r .password <<<"$creds")
+	if [[ $(BW_SESSION='' cli status | jq -r .status) == unauthenticated ]]; then
+		BW_SESSION='' cli config server "$(jq -r .server <<<"$creds")" >/dev/null
+		BW_SESSION='' cli login --apikey >/dev/null 2>&1 || fail 'API key login refused (revoked or rotated identity?)'
+	fi
+	unset creds
+	BW_SESSION=$(BW_SESSION='' cli unlock --passwordenv BW_PASSWORD --raw 2>/dev/null) ||
+		fail 'unlock refused (changed master password?)'
+	unset BW_CLIENTID BW_CLIENTSECRET BW_PASSWORD
+	printf '%s' "$BW_SESSION" | session_store
+	cli sync >/dev/null 2>&1 || true
+}
+
+# Leave every organization as the identity itself: the server drops access
+# for every host at once. Only an organization owner can restore it.
+revoke() {
+	local creds server device token orgs org left=0
+	creds=$(creds_read) || fail 'no identity stored on this host'
+	server=$(jq -r .server <<<"$creds")
+	device=$( (uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid) | tr "[:upper:]" "[:lower:]")
+	token=$(jq -r --arg d "$device" '"grant_type=client_credentials&scope=api&deviceType=8&deviceName=bw-agent" +
+		"&deviceIdentifier=" + $d + "&client_id=" + (.client_id|@uri) + "&client_secret=" + (.client_secret|@uri)' <<<"$creds" |
+		curl -fsS --data @- "$server/identity/connect/token" | jq -r .access_token) || fail 'token request refused'
+	unset creds
+	orgs=$(printf 'Authorization: Bearer %s\n' "$token" |
+		curl -fsS -H @- "$server/api/accounts/profile" | jq -r '.organizations[].id') || fail 'profile read refused'
+	for org in $orgs; do
+		printf 'Authorization: Bearer %s\n' "$token" |
+			curl -fsS -X POST -H @- "$server/api/organizations/$org/leave" >/dev/null || fail "leaving $org failed"
+		left=$((left + 1))
+	done
+	unset token
+	session_clear
+	echo "bw-agent=revoked organizations-left=$left"
+}
+
+case ${1:-} in
+provision)
+	creds=$(jq -c 'select((.server|type)=="string" and (.client_id|type)=="string"
+		and (.client_secret|type)=="string" and (.password|type)=="string")') || fail 'expected identity JSON on stdin'
+	[[ -n $creds ]] || fail 'expected identity JSON on stdin'
+	printf '%s' "$creds" | creds_store
+	unset creds
+	session_clear
+	with_lock unlock
+	echo 'bw-agent=ready'
+	;;
+revoke) revoke ;;
+forget)
+	session_clear
+	cli logout >/dev/null 2>&1 || true
+	if [[ $platform == Darwin ]]; then keychain_delete "$CREDS"; else rm -f "$config/credentials.cred"; fi
+	rm -rf "$state"
+	echo 'bw-agent=forgotten'
+	;;
+'' | -h | --help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
+*)
+	with_lock unlock
+	# A get that misses may be an item escrowed after the last sync: sync once and retry.
+	if [[ $1 == get ]] && ! cli "$@" 2>/dev/null; then
+		cli sync >/dev/null 2>&1 || true
+		exec "$bin/bw-vault" "$@"
+	fi
+	[[ $1 == get ]] && exit 0
+	exec "$bin/bw-vault" "$@"
+	;;
+esac
