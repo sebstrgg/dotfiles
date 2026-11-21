@@ -43,9 +43,11 @@ config) ;;
 login) [[ $BW_CLIENTSECRET == $(<"$SERVER/secret") ]] && printf '%s' "$BW_CLIENTSECRET" >"$p/auth" ;;
 unlock) [[ -f $p/auth && $BW_PASSWORD == fixture-password ]] && echo "s$RANDOM" >"$p/session" && printf '%s' "$(<"$p/session")" ;;
 sync)
-	[[ ! -e $SERVER/offline && $(<"$p/auth") == $(<"$SERVER/secret") ]] || exit 1
-	# Like the real CLI, a plain sync skips while the revision is unchanged.
+	[[ ! -e $SERVER/offline ]] || exit 1
+	# Like the real CLI, a plain sync skips while the revision is unchanged and
+	# logs in again only when it does sync.
 	if [[ ${2:-} == --force || $(<"$SERVER/revision") != $(cat "$p/revision" 2>/dev/null) ]]; then
+		[[ $(<"$p/auth") == $(<"$SERVER/secret") ]] || exit 1
 		cp "$SERVER/items" "$p/items"
 		cp "$SERVER/revision" "$p/revision"
 	fi ;;
@@ -128,12 +130,28 @@ printf 'fixture-value\n' >"$SERVER/items"
 bump
 echo 'PASS: a change that moves no revision date stops serving at the next forced sync'
 
+[[ $("$agent" get password some-id) == fixture-value ]]
+touch -d '2 hours' "$profile/forced-sync"
+: >"$SERVER/items"
+if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi
+printf 'fixture-value\n' >"$SERVER/items"
+bump
+echo 'PASS: a forced-sync stamp in the future, after a clock step back, forces a sync'
+
+[[ $("$agent" get password some-id) == fixture-value ]]
+touch -d '6 minutes ago' "$profile/forced-sync"
 touch "$SERVER/offline"
 if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi
 rm "$SERVER/offline"
-echo 'PASS: an unreachable server fails closed'
+: >"$SERVER/items"
+if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi
+printf 'fixture-value\n' >"$SERVER/items"
+bump
+echo 'PASS: an unreachable server fails closed, and the failed forced sync is retried'
 
+# Rotating the API key moves the account revision date.
 printf secret-2 >"$SERVER/secret"
+bump
 if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi
 identity secret-2 | "$agent" provision >/dev/null
 [[ $("$agent" get password some-id) == fixture-value ]]

@@ -194,9 +194,10 @@ owner's `bw-bridge`.
   there in plain text. A reboot empties it and the next call logs in again.
 - **Freshness:** every call syncs before it reads and fails when the server is
   unreachable. A plain sync catches each change that moves the account
-  revision date, such as a revoked grant, at once. A forced sync, which also
-  catches anything else, runs at most every five minutes per host, because it
-  logs in again on the server's rate-limited login route. Calls on one host
+  revision date, such as a revoked grant, at once, and logs in again on the
+  server's rate-limited login route only when that date moved. A forced sync
+  also catches anything else but always logs in, so it runs once the last
+  successful one is five minutes old on that host. Calls on one host
   run one at a time under a host-wide lock.
 
 Provision a host by piping the identity JSON from the owner's vault, never

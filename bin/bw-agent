@@ -87,6 +87,7 @@ account=$(id -un)
 [[ $account =~ ^[A-Za-z0-9._-]+$ ]] || fail 'unexpected account name'
 
 mode() { if [[ $platform == Darwin ]]; then stat -f %Lp "$1"; else stat -c %a "$1"; fi; }
+mtime() { if [[ $platform == Darwin ]]; then stat -f %m "$1"; else stat -c %Y "$1"; fi; }
 private_dir() { [[ -d $1 && ! -L $1 && -O $1 && $(mode "$1") == 700 ]]; }
 
 # The Linux runtime tmpfs, or the macOS per-user temporary directory.
@@ -172,12 +173,14 @@ cli() { "$bin/bw-vault" "$@"; }
 status() { cli status 2>/dev/null | jq -r .status; }
 # Every call syncs and fails closed when the server is unreachable. A plain
 # sync catches each change that moves the account revision date, such as a
-# revoked grant. A forced sync also catches anything else, but it logs in
-# again on the server's rate-limited login route, so it runs at most every
-# five minutes per host.
+# revoked grant, and stays off the server's rate-limited login route while the
+# date is unchanged. A forced sync also catches anything else but always logs
+# in again, so it runs once the last successful one is five minutes old, or
+# when the host clock has stepped back past it.
 sync_or_fail() {
-	local stamp=$BITWARDENCLI_APPDATA_DIR/forced-sync
-	if [[ -f $stamp && -z $(find "$stamp" -mmin +5 2>/dev/null) ]]; then
+	local stamp=$BITWARDENCLI_APPDATA_DIR/forced-sync age=-1
+	[[ -f $stamp ]] && age=$(($(date +%s) - $(mtime "$stamp")))
+	if ((age >= 0 && age < 300)); then
 		cli sync >/dev/null 2>&1 || fail 'vault sync failed; cached items are not served'
 	else
 		cli sync --force >/dev/null 2>&1 || fail 'vault sync failed; cached items are not served'
