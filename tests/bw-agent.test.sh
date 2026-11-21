@@ -32,7 +32,7 @@ cat >"$fixture/stubs/npx" <<'STUB'
 shift 4 # --yes --package=... -- bw
 p=$BITWARDENCLI_APPDATA_DIR
 mkdir -p "$p"
-echo "$1 session=${BW_SESSION:-}" | tee -a "$LOG.all" >>"$LOG"
+echo "$1${2:+ $2} session=${BW_SESSION:-}" | tee -a "$LOG.all" >>"$LOG"
 current() { [[ -n ${BW_SESSION:-} && -f $p/session && $BW_SESSION == $(<"$p/session") ]]; }
 case $1 in
 status)
@@ -44,9 +44,11 @@ login) [[ $BW_CLIENTSECRET == $(<"$SERVER/secret") ]] && printf '%s' "$BW_CLIENT
 unlock) [[ -f $p/auth && $BW_PASSWORD == fixture-password ]] && echo "s$RANDOM" >"$p/session" && printf '%s' "$(<"$p/session")" ;;
 sync)
 	[[ ! -e $SERVER/offline && $(<"$p/auth") == $(<"$SERVER/secret") ]] || exit 1
-	# Like the real CLI, a sync without --force may skip and keep the cache.
-	[[ ${2:-} == --force ]] && cp "$SERVER/items" "$p/items"
-	true ;;
+	# Like the real CLI, a plain sync skips while the revision is unchanged.
+	if [[ ${2:-} == --force || $(<"$SERVER/revision") != $(cat "$p/revision" 2>/dev/null) ]]; then
+		cp "$SERVER/items" "$p/items"
+		cp "$SERVER/revision" "$p/revision"
+	fi ;;
 get)
 	current || exit 1
 	if [[ -s $p/items ]]; then cat "$p/items"; else echo '{"success":false,"message":"Not found."}'; exit 1; fi ;;
@@ -60,7 +62,9 @@ export PATH="$fixture/stubs:$PATH"
 agent=$root/bin/bw-agent
 identity() { printf '{"server":"https://vault.example","client_id":"user.x","client_secret":"%s","password":"fixture-password"}' "$1"; }
 unlocks() { grep -c '^unlock' "$LOG" || true; }
+bump() { date +%s%N >"$SERVER/revision"; }
 printf 'fixture-value\n' >"$SERVER/items"
+bump
 printf secret-1 >"$SERVER/secret"
 
 if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi
@@ -102,11 +106,27 @@ piped='{ sleep 1; "$1" get password some-id; } | { sleep 0.5; "$1" encode; } | "
 [[ $(timeout 20 bash -c "$piped" _ "$agent") == edited:fixture-value ]]
 echo 'PASS: an empty payload argument reads stdin before the lock'
 
+: >"$LOG"
+for _ in 1 2 3; do "$agent" get password some-id >/dev/null; done
+if grep -q '^sync --force' "$LOG"; then exit 1; fi
+echo 'PASS: repeated calls skip the forced sync, which logs in again, within its interval'
+
 : >"$SERVER/items"
+bump
 if out=$("$agent" get password some-id); then exit 1; fi
 [[ $(wc -l <<<"$out") == 1 && $out != *fixture-value* ]]
 printf 'fixture-value\n' >"$SERVER/items"
+bump
+[[ $("$agent" get password some-id) == fixture-value ]]
 echo 'PASS: a grant revoked on the server stops the cached item, with one error document'
+
+: >"$SERVER/items"
+[[ $("$agent" get password some-id) == fixture-value ]]
+touch -d '6 minutes ago' "$profile/forced-sync"
+if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi
+printf 'fixture-value\n' >"$SERVER/items"
+bump
+echo 'PASS: a change that moves no revision date stops serving at the next forced sync'
 
 touch "$SERVER/offline"
 if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi

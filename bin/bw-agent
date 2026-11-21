@@ -170,9 +170,20 @@ session_clear() {
 
 cli() { "$bin/bw-vault" "$@"; }
 status() { cli status 2>/dev/null | jq -r .status; }
-# --force: a plain sync skips when the account revision date looks unchanged,
-# which would keep serving a revoked grant from the cache.
-sync_or_fail() { cli sync --force >/dev/null 2>&1 || fail 'vault sync failed; cached items are not served'; }
+# Every call syncs and fails closed when the server is unreachable. A plain
+# sync catches each change that moves the account revision date, such as a
+# revoked grant. A forced sync also catches anything else, but it logs in
+# again on the server's rate-limited login route, so it runs at most every
+# five minutes per host.
+sync_or_fail() {
+	local stamp=$BITWARDENCLI_APPDATA_DIR/forced-sync
+	if [[ -f $stamp && -z $(find "$stamp" -mmin +5 2>/dev/null) ]]; then
+		cli sync >/dev/null 2>&1 || fail 'vault sync failed; cached items are not served'
+	else
+		cli sync --force >/dev/null 2>&1 || fail 'vault sync failed; cached items are not served'
+		touch "$stamp"
+	fi
+}
 
 # Log in with the identity JSON in $1 when the profile has no login, then unlock.
 login_unlock() {
