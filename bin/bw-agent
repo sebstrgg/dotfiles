@@ -178,7 +178,9 @@ status() { cli status 2>/dev/null | jq -r .status; }
 # anything else but always logs in again, so it runs once the last successful
 # one is five minutes old, or when the host clock has stepped back past it. An
 # API-key login runs its own forced full sync and counts as one, so a cold
-# start makes one login request rather than two.
+# start makes one login request rather than two. A login whose sync failed
+# leaves the CLI's last-sync date empty, so the plain sync after it is full;
+# re-check both facts when bw-vault's CLI version changes.
 sync_or_fail() {
 	local stamp=$BITWARDENCLI_APPDATA_DIR/forced-sync age=-1
 	[[ -f $stamp ]] && age=$(($(date +%s) - $(mtime "$stamp")))
