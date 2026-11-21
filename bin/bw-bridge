@@ -100,7 +100,18 @@ if [[ $PLATFORM == Linux ]]; then
 	echo "OK: verified Bitwarden session cached in private runtime tmpfs for $hours hours."
 	exit 0
 fi
-/usr/bin/security add-generic-password -U -a "$USER" -s "$SERVICE" -w "$session"
+# `security -i` reads its command from stdin, so the session never enters argv
+# where other processes could list it. A session key is base64, so it needs no
+# quoting there; anything else is refused, and the stored value is read back.
+if [[ ! $session =~ ^[A-Za-z0-9+/=]+$ || ! $USER =~ ^[A-Za-z0-9._-]+$ ]]; then
+	echo 'ERROR: unexpected session or account format; nothing cached' >&2
+	exit 1
+fi
+printf 'add-generic-password -U -a %s -s %s -w %s\n' "$USER" "$SERVICE" "$session" | /usr/bin/security -i >/dev/null
+if [[ $(cached_session) != "$session" ]]; then
+	echo 'ERROR: the Login Keychain did not store the session' >&2
+	exit 1
+fi
 unset session
 mkdir -p "$STATE_DIR"
 echo "$expires" >"$EXPIRES_AT"
