@@ -51,6 +51,7 @@ get)
 	current || exit 1
 	if [[ -s $p/items ]]; then cat "$p/items"; else echo '{"success":false,"message":"Not found."}'; exit 1; fi ;;
 encode) base64 -w0 ;;
+create) current && echo created ;;
 edit) current && if [[ -n ${4:-} ]]; then echo "edited:$(base64 -d <<<"$4")"; else echo "edited:$(base64 -d)"; fi ;;
 esac
 STUB
@@ -93,8 +94,13 @@ echo 'PASS: a piped get, encode and edit do not deadlock on the lock'
 
 payload=$(printf fixture-value | base64 -w0)
 [[ $(timeout 10 "$agent" edit item some-id "$payload" < <(sleep 30)) == edited:fixture-value ]]
-[[ $(timeout 10 "$agent" edit item some-id '' <<<"$payload") == edited:fixture-value ]]
-echo 'PASS: a payload in argv never waits on an open stdin'
+timeout 10 "$agent" create attachment --file x --itemid y < <(sleep 30) >/dev/null
+echo 'PASS: a payload in argv, or an attachment, never waits on an open stdin'
+
+# shellcheck disable=SC2016
+piped='{ sleep 1; "$1" get password some-id; } | { sleep 0.5; "$1" encode; } | "$1" edit item some-id ""'
+[[ $(timeout 20 bash -c "$piped" _ "$agent") == edited:fixture-value ]]
+echo 'PASS: an empty payload argument reads stdin before the lock'
 
 : >"$SERVER/items"
 if out=$("$agent" get password some-id); then exit 1; fi
