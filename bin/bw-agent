@@ -41,8 +41,24 @@ fail() {
 if [[ ${BW_AGENT_LOCKED:-} != 1 ]]; then
 	mkdir -p "$state"
 	export BW_AGENT_LOCKED=1
-	if [[ $platform == Darwin ]]; then exec /usr/bin/lockf -k -t 120 "$state/lock" "$0" "$@"; fi
-	exec flock -w 120 "$state/lock" "$0" "$@"
+	locked() {
+		if [[ $platform == Darwin ]]; then exec /usr/bin/lockf -k -t 120 "$state/lock" "$0" "$@"; fi
+		exec flock -w 120 "$state/lock" "$0" "$@"
+	}
+	# A payload command reads its piped input before it waits for the lock,
+	# so `bw-agent get … | bw-agent encode | bw-agent edit …` cannot deadlock.
+	case $1 in create | edit | encode | move)
+		if [[ ! -t 0 ]]; then
+			input=$(
+				cat
+				printf x
+			)
+			printf '%s' "${input%x}" | locked "$@"
+			exit
+		fi
+		;;
+	esac
+	locked "$@"
 fi
 unset BW_AGENT_LOCKED
 

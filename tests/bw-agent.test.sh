@@ -46,6 +46,8 @@ sync) [[ ! -e $SERVER/offline && $(<"$p/auth") == $(<"$SERVER/secret") ]] && cp 
 get)
 	current || exit 1
 	if [[ -s $p/items ]]; then cat "$p/items"; else echo '{"success":false,"message":"Not found."}'; exit 1; fi ;;
+encode) base64 -w0 ;;
+edit) current && echo "edited:$(base64 -d)" ;;
 esac
 STUB
 chmod +x "$fixture/stubs/"*
@@ -77,6 +79,13 @@ for _ in 1 2 3 4; do "$agent" get password some-id >"$fixture/out.$_" & done
 wait
 [[ $(unlocks) == 1 && $(cat "$fixture"/out.* | sort -u) == fixture-value ]]
 echo 'PASS: parallel callers share one unlock'
+
+# edit starts first and get last: a payload command that took the lock before
+# reading its input would hold it while its producer waits for it.
+# shellcheck disable=SC2016
+piped='{ sleep 1; "$1" get password some-id; } | { sleep 0.5; "$1" encode; } | "$1" edit item some-id'
+[[ $(timeout 20 bash -c "$piped" _ "$agent") == edited:fixture-value ]]
+echo 'PASS: a piped get, encode and edit do not deadlock on the lock'
 
 : >"$SERVER/items"
 if out=$("$agent" get password some-id); then exit 1; fi
