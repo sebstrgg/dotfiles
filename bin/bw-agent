@@ -1,0 +1,268 @@
+#!/bin/bash
+# Run the Bitwarden CLI as this host's agent identity, unlocking unattended.
+#
+# The agent identity is a vault user that sees only the collections it was
+# granted. Its API key and master password live in this host's own secret
+# store (macOS Login Keychain; Linux systemd-creds bound to this host and
+# user). Its CLI profile lives in private volatile storage that backups skip,
+# and the owner's bw-bridge session is never read or changed. Every command
+# syncs first and fails closed, so a revoked grant stops serving cached items.
+# Values never enter argv, stdout or logs.
+#
+#   bw-agent <bw arguments>   e.g. bw-agent get password <item-id>
+#   bw-agent provision        check, then store {server,client_id,client_secret,password} JSON from stdin
+#   bw-agent revoke           leave every organization: cuts access on all hosts at once
+#   bw-agent forget           remove this host's stored identity, profile and session
+set -euo pipefail
+set +x
+umask 077
+
+case ${1:-} in '' | -h | --help)
+	sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+	exit 0
+	;;
+esac
+
+bin=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+platform=$(uname -s)
+state=${XDG_STATE_HOME:-$HOME/.local/state}/bw-agent
+config=${XDG_CONFIG_HOME:-$HOME/.config}/bw-agent
+readonly CREDS=bw-agent-credentials SESSION=bw-agent-session
+readonly HTTPS_URL='^https://[A-Za-z0-9.-]+(:[0-9]+)?$'
+
+fail() {
+	echo "bw-agent: $1" >&2
+	exit 1
+}
+
+# True when the CLI will read this command's payload from stdin: encode
+# always; create (except attachments), edit and move when the payload
+# argument is absent or empty.
+payload_from_stdin() {
+	local arg skip='' n=0
+	for arg in "${@:2}"; do
+		if [[ -n $skip ]]; then
+			skip=''
+			continue
+		fi
+		case $arg in
+		--organizationid | --itemid | --file) skip=1 ;;
+		-* | '') ;;
+		*) n=$((n + 1)) ;;
+		esac
+	done
+	case $1 in
+	encode) true ;;
+	create) [[ ${2:-} != attachment ]] && ((n < 2)) ;;
+	edit | move) ((n < 3)) ;;
+	*) false ;;
+	esac
+}
+
+# Each run holds one host-wide lock from start to end, so unlocks, syncs and
+# the CLI's own profile writes never interleave, and forget never pulls the
+# profile from under a running command.
+if [[ ${BW_AGENT_LOCKED:-} != 1 ]]; then
+	mkdir -p "$state"
+	export BW_AGENT_LOCKED=1
+	locked() {
+		if [[ $platform == Darwin ]]; then exec /usr/bin/lockf -k -t 120 "$state/lock" "$0" "$@"; fi
+		exec flock -w 120 "$state/lock" "$0" "$@"
+	}
+	# A payload command reads piped input before it waits for the lock, so
+	# `bw-agent get … | bw-agent encode | bw-agent edit …` cannot deadlock.
+	if [[ ! -t 0 ]] && payload_from_stdin "$@"; then
+		input=$(
+			cat
+			printf x
+		)
+		printf '%s' "${input%x}" | locked "$@"
+		exit
+	fi
+	locked "$@"
+fi
+unset BW_AGENT_LOCKED
+
+account=$(id -un)
+[[ $account =~ ^[A-Za-z0-9._-]+$ ]] || fail 'unexpected account name'
+
+mode() { if [[ $platform == Darwin ]]; then stat -f %Lp "$1"; else stat -c %a "$1"; fi; }
+private_dir() { [[ -d $1 && ! -L $1 && -O $1 && $(mode "$1") == 700 ]]; }
+
+# The Linux runtime tmpfs, or the macOS per-user temporary directory.
+volatile_dir() {
+	local base
+	if [[ $platform == Darwin ]]; then
+		base=$(getconf DARWIN_USER_TEMP_DIR) && base=${base%/}
+	else
+		base=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+		[[ $(stat -f -c %T "$base" 2>/dev/null) == tmpfs ]] || return 1
+	fi
+	[[ $base == /* ]] && private_dir "$base" || return 1
+	mkdir -p "$base/bw-agent"
+	private_dir "$base/bw-agent" || return 1
+	printf '%s\n' "$base/bw-agent"
+}
+
+vol=$(volatile_dir) || fail 'no private volatile directory for the CLI profile'
+export BITWARDENCLI_APPDATA_DIR=$vol/cli
+unset BW_CLIENTID BW_CLIENTSECRET BW_PASSWORD
+# An empty, set BW_SESSION keeps bw-vault from loading the owner's bridge session.
+export BW_SESSION=
+
+# macOS Keychain writes go through `security -i` so values stay out of argv.
+keychain_store() {
+	local encoded
+	encoded=$(base64 | tr -d '\n')
+	printf 'add-generic-password -U -a %s -s %s -w %s\n' "$account" "$1" "$encoded" |
+		/usr/bin/security -i >/dev/null
+}
+keychain_read() {
+	/usr/bin/security find-generic-password -a "$account" -s "$1" -w 2>/dev/null | base64 -d
+}
+keychain_delete() {
+	local rc=0
+	/usr/bin/security delete-generic-password -a "$account" -s "$1" >/dev/null 2>&1 || rc=$?
+	# 44: no such item.
+	((rc == 0 || rc == 44)) || fail "could not delete Keychain item $1"
+}
+
+creds_store() {
+	if [[ $platform == Darwin ]]; then
+		keychain_store "$CREDS"
+	else
+		mkdir -p "$config"
+		systemd-creds --user encrypt --name="$CREDS" - "$config/credentials.cred" >/dev/null
+	fi
+}
+creds_read() {
+	if [[ $platform == Darwin ]]; then
+		keychain_read "$CREDS"
+	else
+		[[ -f $config/credentials.cred ]] || return 1
+		systemd-creds --user decrypt --name="$CREDS" "$config/credentials.cred" - 2>/dev/null
+	fi
+}
+
+# A new file renamed into place: a planted link at the session path is
+# replaced, never written through.
+session_store() {
+	local tmp
+	if [[ $platform == Darwin ]]; then
+		keychain_store "$SESSION"
+	else
+		tmp=$(mktemp "$vol/session.XXXXXX")
+		cat >"$tmp"
+		mv -f "$tmp" "$vol/session"
+	fi
+}
+session_read() {
+	if [[ $platform == Darwin ]]; then
+		keychain_read "$SESSION"
+	else
+		[[ -f $vol/session && ! -L $vol/session && -O $vol/session && $(mode "$vol/session") == 600 ]] || return 1
+		cat "$vol/session"
+	fi
+}
+session_clear() {
+	if [[ $platform == Darwin ]]; then keychain_delete "$SESSION"; else rm -f "$vol/session"; fi
+}
+
+cli() { "$bin/bw-vault" "$@"; }
+status() { cli status 2>/dev/null | jq -r .status; }
+# --force: a plain sync skips when the account revision date looks unchanged,
+# which would keep serving a revoked grant from the cache.
+sync_or_fail() { cli sync --force >/dev/null 2>&1 || fail 'vault sync failed; cached items are not served'; }
+
+# Log in with the identity JSON in $1 when the profile has no login, then unlock.
+login_unlock() {
+	export BW_CLIENTID BW_CLIENTSECRET BW_PASSWORD
+	BW_CLIENTID=$(jq -r .client_id <<<"$1")
+	BW_CLIENTSECRET=$(jq -r .client_secret <<<"$1")
+	BW_PASSWORD=$(jq -r .password <<<"$1")
+	if [[ $(BW_SESSION='' status) == unauthenticated ]]; then
+		BW_SESSION='' cli config server "$(jq -r .server <<<"$1")" >/dev/null
+		BW_SESSION='' cli login --apikey >/dev/null 2>&1 || fail 'API key login refused (revoked or rotated identity?)'
+	fi
+	BW_SESSION=$(BW_SESSION='' cli unlock --passwordenv BW_PASSWORD --raw 2>/dev/null) ||
+		fail 'unlock refused (changed master password?)'
+	unset BW_CLIENTID BW_CLIENTSECRET BW_PASSWORD
+	export BW_SESSION
+}
+
+unlock() {
+	local creds
+	BW_SESSION=$(session_read 2>/dev/null) || BW_SESSION=
+	export BW_SESSION
+	[[ -n $BW_SESSION && $(status) == unlocked ]] && return 0
+	creds=$(creds_read) || fail 'no identity stored on this host; see the vault runbook to provision it'
+	login_unlock "$creds"
+	printf '%s' "$BW_SESSION" | session_store
+}
+
+reset_profile() {
+	session_clear || true
+	rm -rf "$BITWARDENCLI_APPDATA_DIR"
+}
+
+# A fresh profile, so a rotated or replaced identity never inherits the old
+# login; the identity is stored only after it logged in, unlocked and synced.
+provision() {
+	local creds
+	creds=$(jq -c --arg url "$HTTPS_URL" 'select((.server|type)=="string" and (.server|test($url))
+		and (.client_id|type)=="string" and (.client_secret|type)=="string"
+		and (.password|type)=="string")') || fail 'expected identity JSON on stdin'
+	[[ -n $creds ]] || fail 'expected identity JSON with an https server on stdin'
+	reset_profile
+	trap reset_profile EXIT
+	login_unlock "$creds"
+	sync_or_fail
+	printf '%s' "$creds" | creds_store
+	printf '%s' "$BW_SESSION" | session_store
+	trap - EXIT
+	echo 'bw-agent=ready'
+}
+
+# Leave every organization as the identity itself: the server drops access
+# for every host at once. Only an organization owner can restore it.
+revoke() {
+	local creds server device token orgs org left=0
+	creds=$(creds_read) || fail 'no identity stored on this host'
+	server=$(jq -r .server <<<"$creds")
+	[[ $server =~ $HTTPS_URL ]] || fail 'stored server is not an https URL'
+	device=$( (uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid) | tr "[:upper:]" "[:lower:]")
+	# -q first: no curlrc may add tracing that would log the secret or token.
+	token=$(jq -r --arg d "$device" '"grant_type=client_credentials&scope=api&deviceType=8&deviceName=bw-agent" +
+		"&deviceIdentifier=" + $d + "&client_id=" + (.client_id|@uri) + "&client_secret=" + (.client_secret|@uri)' <<<"$creds" |
+		curl -q -fsS --proto =https --data @- "$server/identity/connect/token" | jq -r '.access_token // empty') ||
+		fail 'token request refused'
+	unset creds
+	[[ -n $token ]] || fail 'token request refused'
+	orgs=$(printf 'Authorization: Bearer %s\n' "$token" |
+		curl -q -fsS --proto =https -H @- "$server/api/accounts/profile" | jq -r '.organizations[].id') ||
+		fail 'profile read refused'
+	for org in $orgs; do
+		printf 'Authorization: Bearer %s\n' "$token" |
+			curl -q -fsS --proto =https -X POST -H @- "$server/api/organizations/$org/leave" >/dev/null ||
+			fail "leaving $org failed"
+		left=$((left + 1))
+	done
+	unset token
+	reset_profile
+	echo "bw-agent=revoked organizations-left=$left"
+}
+
+case $1 in
+provision) provision ;;
+revoke) revoke ;;
+forget)
+	reset_profile
+	if [[ $platform == Darwin ]]; then keychain_delete "$CREDS"; else rm -f "$config/credentials.cred"; fi
+	echo 'bw-agent=forgotten'
+	;;
+*)
+	unlock
+	sync_or_fail
+	exec "$bin/bw-vault" "$@"
+	;;
+esac

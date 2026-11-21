@@ -173,6 +173,50 @@ deleting the standalone `atuin-key` item.
 
 ---
 
+## Agent identity (bw-agent)
+
+Agents read what their tasks routinely need without a human unlock through
+`bw-agent`, a separate vault user that is a plain member (never admin) of the
+organization collections granted to it. Everything else stays behind the
+owner's `bw-bridge`.
+
+- **Store:** each host keeps the identity's server, API key and master
+  password in its own secret store: the macOS Login Keychain item
+  `bw-agent-credentials`, or `~/.config/bw-agent/credentials.cred` encrypted by
+  `systemd-creds --user` to that host and user.
+- **Session:** the Keychain item `bw-agent-session` on macOS, or the 0600
+  `$XDG_RUNTIME_DIR/bw-agent/session` on Linux. It has no expiry; when it goes
+  stale, the next call unlocks again from the store.
+- **Profile:** the CLI runs with an empty `BW_SESSION`, so it never reads or
+  changes the owner's bridge, in a profile in volatile private storage that
+  backups skip (`$XDG_RUNTIME_DIR/bw-agent/cli`, or `bw-agent/cli` in the
+  macOS per-user temporary directory), because the CLI keeps the API secret
+  there in plain text. A reboot empties it and the next call logs in again.
+- **Freshness:** every call syncs before it reads and fails when the server is
+  unreachable, so a revoked grant stops serving cached items at once. Calls
+  on one host run one at a time under a host-wide lock.
+
+Provision a host by piping the identity JSON from the owner's vault, never
+through a terminal or argv:
+
+```bash
+<identity json producer> | ssh <host> '~/.local/bin/bw-agent provision'
+bw-agent get password <item-id>   # then, as any agent on that host
+```
+
+The JSON shape is `{"server", "client_id", "client_secret", "password"}`,
+with an `https://` server. Provisioning starts a fresh profile and stores the
+identity only after it logged in, unlocked and synced, so re-provisioning
+after a key rotation replaces the old login.
+
+**Revocation:** `bw-agent revoke` makes the identity leave every
+organization, which cuts access for all hosts at once; only an owner can
+re-invite it. An owner can also revoke the member in the web vault.
+`bw-agent forget` removes one host's stored identity and state.
+Linux regression: `bash tests/bw-agent.test.sh`.
+
+---
+
 ## Unlock behavior
 
 | Platform | Agent | Lock behavior |
