@@ -1,6 +1,7 @@
 #!/bin/bash
 # Failure modes: an agent must unlock its own identity without a human, never
-# borrow the owner's bridge session, and re-unlock when its session goes stale.
+# borrow the owner's bridge session, never serve a cached item the server no
+# longer grants, and survive rotation, parallel callers and planted links.
 set -euo pipefail
 [[ $(uname -s) == Linux ]] || {
 	echo 'SKIP: Linux secret store and runtime cache'
@@ -10,8 +11,10 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 fixture=$(mktemp -d /dev/shm/bw-agent-test.XXXXXX)
 trap 'rm -rf "$fixture"' EXIT
 export XDG_RUNTIME_DIR=$fixture/run XDG_STATE_HOME=$fixture/state XDG_CONFIG_HOME=$fixture/config
-mkdir -m 700 "$XDG_RUNTIME_DIR" "$fixture/stubs"
-log=$fixture/calls.log
+mkdir -m 700 "$XDG_RUNTIME_DIR" "$fixture/stubs" "$fixture/server"
+export LOG=$fixture/calls.log SERVER=$fixture/server
+profile=$XDG_RUNTIME_DIR/bw-agent/cli
+session=$XDG_RUNTIME_DIR/bw-agent/session
 
 # systemd-creds stand-in: a plain copy, enough to exercise the store path.
 cat >"$fixture/stubs/systemd-creds" <<'STUB'
@@ -22,53 +25,90 @@ encrypt) cat >"$4" ;;
 decrypt) cat "$3" ;;
 esac
 STUB
-# Bitwarden CLI stand-in: one identity whose session is "agent-session".
+# Bitwarden CLI stand-in. The server holds the valid API secret and the items
+# the identity is granted; sync copies them into the local profile.
 cat >"$fixture/stubs/npx" <<'STUB'
 #!/bin/bash
 shift 4 # --yes --package=... -- bw
-state=$BITWARDENCLI_APPDATA_DIR/fake
-mkdir -p "$BITWARDENCLI_APPDATA_DIR"
-echo "$1 session=${BW_SESSION:-}" >>"$LOG"
+p=$BITWARDENCLI_APPDATA_DIR
+mkdir -p "$p"
+echo "$1 session=${BW_SESSION:-}" | tee -a "$LOG.all" >>"$LOG"
+current() { [[ -n ${BW_SESSION:-} && -f $p/session && $BW_SESSION == $(<"$p/session") ]]; }
 case $1 in
 status)
-	if [[ ! -f $state ]]; then echo '{"status":"unauthenticated"}'
-	elif [[ ${BW_SESSION:-} == agent-session && $(<"$state") == unlocked ]]; then echo '{"status":"unlocked"}'
+	if [[ ! -f $p/auth ]]; then echo '{"status":"unauthenticated"}'
+	elif current; then echo '{"status":"unlocked"}'
 	else echo '{"status":"locked"}'; fi ;;
 config) ;;
-login) [[ $BW_CLIENTSECRET == fixture-secret ]] && echo locked >"$state" ;;
-unlock) [[ $BW_PASSWORD == fixture-password ]] && echo unlocked >"$state" && printf agent-session ;;
-sync) ;;
-get) [[ ${BW_SESSION:-} == agent-session ]] && echo fixture-value ;;
-lock) echo locked >"$state" ;;
+login) [[ $BW_CLIENTSECRET == $(<"$SERVER/secret") ]] && printf '%s' "$BW_CLIENTSECRET" >"$p/auth" ;;
+unlock) [[ -f $p/auth && $BW_PASSWORD == fixture-password ]] && echo "s$RANDOM" >"$p/session" && printf '%s' "$(<"$p/session")" ;;
+sync) [[ ! -e $SERVER/offline && $(<"$p/auth") == $(<"$SERVER/secret") ]] && cp "$SERVER/items" "$p/items" ;;
+get)
+	current || exit 1
+	if [[ -s $p/items ]]; then cat "$p/items"; else echo '{"success":false,"message":"Not found."}'; exit 1; fi ;;
 esac
 STUB
 chmod +x "$fixture/stubs/"*
-export PATH="$fixture/stubs:$PATH" LOG=$log
+export PATH="$fixture/stubs:$PATH"
 agent=$root/bin/bw-agent
+identity() { printf '{"server":"https://vault.example","client_id":"user.x","client_secret":"%s","password":"fixture-password"}' "$1"; }
+unlocks() { grep -c '^unlock' "$LOG" || true; }
+printf 'fixture-value\n' >"$SERVER/items"
+printf secret-1 >"$SERVER/secret"
 
 if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi
 echo 'PASS: no stored identity fails closed'
 
 printf 'owner-session\n' | "$root/bin/bw-session-cache" store "$(($(date +%s) + 60))"
-echo '{"server":"https://vault.example","client_id":"user.x","client_secret":"fixture-secret","password":"fixture-password"}' |
-	"$agent" provision >/dev/null
+owner=$(cat "$XDG_RUNTIME_DIR/bw-bridge/session")
+identity secret-1 | "$agent" provision >/dev/null
 [[ $("$agent" get password some-id) == fixture-value ]]
-if grep -q 'session=owner-session' "$log"; then exit 1; fi
-[[ $(stat -c %a "$XDG_RUNTIME_DIR/bw-agent/session") == 600 ]]
-echo 'PASS: provisioned identity unlocks unattended and never sees the owner session'
+[[ $(stat -c %a "$session") == 600 && -f $profile/auth && ! -e $XDG_STATE_HOME/bw-agent/cli ]]
+echo 'PASS: provisioned identity unlocks unattended into a volatile profile'
 
-: >"$log"
+: >"$LOG"
 "$agent" get password some-id >/dev/null
-if grep -q '^unlock' "$log"; then exit 1; fi
+[[ $(unlocks) == 0 ]]
 echo 'PASS: a valid session is reused without another unlock'
 
-echo locked >"$XDG_STATE_HOME/bw-agent/cli/fake"
-: >"$log"
+rm "$profile/session"
+: >"$LOG"
+for _ in 1 2 3 4; do "$agent" get password some-id >"$fixture/out.$_" & done
+wait
+[[ $(unlocks) == 1 && $(cat "$fixture"/out.* | sort -u) == fixture-value ]]
+echo 'PASS: parallel callers share one unlock'
+
+: >"$SERVER/items"
+if out=$("$agent" get password some-id); then exit 1; fi
+[[ $(wc -l <<<"$out") == 1 && $out != *fixture-value* ]]
+printf 'fixture-value\n' >"$SERVER/items"
+echo 'PASS: a grant revoked on the server stops the cached item, with one error document'
+
+touch "$SERVER/offline"
+if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi
+rm "$SERVER/offline"
+echo 'PASS: an unreachable server fails closed'
+
+printf secret-2 >"$SERVER/secret"
+if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi
+identity secret-2 | "$agent" provision >/dev/null
 [[ $("$agent" get password some-id) == fixture-value ]]
-grep -q '^unlock' "$log"
-echo 'PASS: a locked session re-unlocks from the host store'
+if identity secret-3 | "$agent" provision >/dev/null 2>&1; then exit 1; fi
+[[ $("$agent" get password some-id) == fixture-value ]]
+echo 'PASS: a rotated key re-provisions into a fresh profile; a bad one keeps the stored identity'
+
+rm "$session"
+ln -s "$XDG_RUNTIME_DIR/bw-bridge/session" "$session"
+rm "$profile/session"
+[[ $("$agent" get password some-id) == fixture-value ]]
+[[ ! -L $session && $(cat "$XDG_RUNTIME_DIR/bw-bridge/session") == "$owner" ]]
+echo 'PASS: a planted session link is replaced, never written through'
 
 if echo '{"server":"x"}' | "$agent" provision >/dev/null 2>&1; then exit 1; fi
+if identity secret-2 | sed 's/https/http/' | "$agent" provision >/dev/null 2>&1; then exit 1; fi
 "$agent" forget >/dev/null
-[[ ! -e $XDG_CONFIG_HOME/bw-agent/credentials.cred && ! -e $XDG_RUNTIME_DIR/bw-agent/session ]]
-echo 'PASS: malformed identity is refused and forget removes host state'
+[[ ! -e $XDG_CONFIG_HOME/bw-agent/credentials.cred && ! -e $session && ! -e $profile ]]
+echo 'PASS: malformed or plain-http identity is refused and forget removes host state'
+
+if grep -q "session=owner-session" "$LOG.all"; then exit 1; fi
+echo 'PASS: no command ever saw the owner session'
