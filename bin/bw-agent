@@ -36,7 +36,8 @@ fail() {
 }
 
 # True when the CLI will read this command's payload from stdin: encode
-# always; create, edit and move when the payload argument is absent.
+# always; create (except attachments), edit and move when the payload
+# argument is absent or empty.
 payload_from_stdin() {
 	local arg skip='' n=0
 	for arg in "${@:2}"; do
@@ -46,13 +47,13 @@ payload_from_stdin() {
 		fi
 		case $arg in
 		--organizationid | --itemid | --file) skip=1 ;;
-		-*) ;;
+		-* | '') ;;
 		*) n=$((n + 1)) ;;
 		esac
 	done
 	case $1 in
 	encode) true ;;
-	create) ((n < 2)) ;;
+	create) [[ ${2:-} != attachment ]] && ((n < 2)) ;;
 	edit | move) ((n < 3)) ;;
 	*) false ;;
 	esac
