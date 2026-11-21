@@ -193,8 +193,12 @@ owner's `bw-bridge`.
   macOS per-user temporary directory), because the CLI keeps the API secret
   there in plain text. A reboot empties it and the next call logs in again.
 - **Freshness:** every call syncs before it reads and fails when the server is
-  unreachable, so a revoked grant stops serving cached items at once. Calls
-  on one host run one at a time under a host-wide lock.
+  unreachable. A plain sync catches each change that moves the account
+  revision date, such as a revoked grant, at once, and logs in again on the
+  server's rate-limited login route only when that date moved or its access
+  token expired. A forced sync also catches anything else but always logs in,
+  so it runs once the last successful one is five minutes old on that host.
+  Calls on one host run one at a time under a host-wide lock.
 
 Provision a host by piping the identity JSON from the owner's vault, never
 through a terminal or argv:
