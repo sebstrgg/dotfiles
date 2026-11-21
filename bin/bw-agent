@@ -174,7 +174,7 @@ status() { cli status 2>/dev/null | jq -r .status; }
 # Every call syncs and fails closed when the server is unreachable. A plain
 # sync catches each change that moves the account revision date, such as a
 # revoked grant, and stays off the server's rate-limited login route while the
-# date is unchanged. A forced sync also catches anything else but always logs
+# date is unchanged and its access token is valid. A forced sync also catches anything else but always logs
 # in again, so it runs once the last successful one is five minutes old, or
 # when the host clock has stepped back past it.
 sync_or_fail() {
