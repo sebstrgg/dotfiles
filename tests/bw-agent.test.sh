@@ -99,8 +99,14 @@ piped='{ sleep 1; "$1" get password some-id; } | { sleep 0.5; "$1" encode; } | "
 echo 'PASS: a piped get, encode and edit do not deadlock on the lock'
 
 payload=$(printf fixture-value | base64 -w0)
-[[ $(timeout 10 "$agent" edit item some-id "$payload" < <(sleep 30)) == edited:fixture-value ]]
-timeout 10 "$agent" create attachment --file x --itemid y < <(sleep 30) >/dev/null
+# A stdin that never closes, fed by a sleep this test stops by its own PID.
+exec {open_stdin}< <(sleep 60)
+feeder=$!
+trap 'kill "$feeder" 2>/dev/null || true; rm -rf "$fixture"' EXIT
+[[ $(timeout 10 "$agent" edit item some-id "$payload" <&"$open_stdin") == edited:fixture-value ]]
+timeout 10 "$agent" create attachment --file x --itemid y <&"$open_stdin" >/dev/null
+kill "$feeder"
+exec {open_stdin}<&-
 echo 'PASS: a payload in argv, or an attachment, never waits on an open stdin'
 
 # shellcheck disable=SC2016
