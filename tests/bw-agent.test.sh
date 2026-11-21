@@ -42,12 +42,16 @@ status)
 config) ;;
 login) [[ $BW_CLIENTSECRET == $(<"$SERVER/secret") ]] && printf '%s' "$BW_CLIENTSECRET" >"$p/auth" ;;
 unlock) [[ -f $p/auth && $BW_PASSWORD == fixture-password ]] && echo "s$RANDOM" >"$p/session" && printf '%s' "$(<"$p/session")" ;;
-sync) [[ ! -e $SERVER/offline && $(<"$p/auth") == $(<"$SERVER/secret") ]] && cp "$SERVER/items" "$p/items" ;;
+sync)
+	[[ ! -e $SERVER/offline && $(<"$p/auth") == $(<"$SERVER/secret") ]] || exit 1
+	# Like the real CLI, a sync without --force may skip and keep the cache.
+	[[ ${2:-} == --force ]] && cp "$SERVER/items" "$p/items"
+	true ;;
 get)
 	current || exit 1
 	if [[ -s $p/items ]]; then cat "$p/items"; else echo '{"success":false,"message":"Not found."}'; exit 1; fi ;;
 encode) base64 -w0 ;;
-edit) current && echo "edited:$(base64 -d)" ;;
+edit) current && if [[ -n ${4:-} ]]; then echo "edited:$(base64 -d <<<"$4")"; else echo "edited:$(base64 -d)"; fi ;;
 esac
 STUB
 chmod +x "$fixture/stubs/"*
@@ -86,6 +90,10 @@ echo 'PASS: parallel callers share one unlock'
 piped='{ sleep 1; "$1" get password some-id; } | { sleep 0.5; "$1" encode; } | "$1" edit item some-id'
 [[ $(timeout 20 bash -c "$piped" _ "$agent") == edited:fixture-value ]]
 echo 'PASS: a piped get, encode and edit do not deadlock on the lock'
+
+payload=$(printf fixture-value | base64 -w0)
+[[ $(timeout 10 "$agent" edit item some-id "$payload" < <(sleep 30)) == edited:fixture-value ]]
+echo 'PASS: a payload in argv never waits on an open stdin'
 
 : >"$SERVER/items"
 if out=$("$agent" get password some-id); then exit 1; fi
