@@ -174,9 +174,13 @@ status() { cli status 2>/dev/null | jq -r .status; }
 # Every call syncs and fails closed when the server is unreachable. A plain
 # sync catches each change that moves the account revision date, such as a
 # revoked grant, and stays off the server's rate-limited login route while the
-# date is unchanged and its access token is valid. A forced sync also catches anything else but always logs
-# in again, so it runs once the last successful one is five minutes old, or
-# when the host clock has stepped back past it.
+# date is unchanged and its access token is valid. A forced sync also catches
+# anything else but always logs in again, so it runs once the last successful
+# one is five minutes old, or when the host clock has stepped back past it. An
+# API-key login runs its own forced full sync and counts as one, so a cold
+# start makes one login request rather than two. A login whose sync failed
+# leaves the CLI's last-sync date empty, so the plain sync after it is full;
+# re-check both facts when bw-vault's CLI version changes.
 sync_or_fail() {
 	local stamp=$BITWARDENCLI_APPDATA_DIR/forced-sync age=-1
 	[[ -f $stamp ]] && age=$(($(date +%s) - $(mtime "$stamp")))
@@ -197,6 +201,7 @@ login_unlock() {
 	if [[ $(BW_SESSION='' status) == unauthenticated ]]; then
 		BW_SESSION='' cli config server "$(jq -r .server <<<"$1")" >/dev/null
 		BW_SESSION='' cli login --apikey >/dev/null 2>&1 || fail 'API key login refused (revoked or rotated identity?)'
+		touch "$BITWARDENCLI_APPDATA_DIR/forced-sync"
 	fi
 	BW_SESSION=$(BW_SESSION='' cli unlock --passwordenv BW_PASSWORD --raw 2>/dev/null) ||
 		fail 'unlock refused (changed master password?)'

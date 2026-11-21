@@ -40,7 +40,11 @@ status)
 	elif current; then echo '{"status":"unlocked"}'
 	else echo '{"status":"locked"}'; fi ;;
 config) ;;
-login) [[ $BW_CLIENTSECRET == $(<"$SERVER/secret") ]] && printf '%s' "$BW_CLIENTSECRET" >"$p/auth" ;;
+# Like the real CLI, an API-key login runs a full sync and logs in once.
+login)
+	[[ $BW_CLIENTSECRET == $(<"$SERVER/secret") ]] || exit 1
+	printf '%s' "$BW_CLIENTSECRET" >"$p/auth"
+	[[ -e $SERVER/offline ]] || { cp "$SERVER/items" "$p/items"; cp "$SERVER/revision" "$p/revision"; } ;;
 unlock) [[ -f $p/auth && $BW_PASSWORD == fixture-password ]] && echo "s$RANDOM" >"$p/session" && printf '%s' "$(<"$p/session")" ;;
 sync)
 	[[ ! -e $SERVER/offline ]] || exit 1
@@ -154,6 +158,23 @@ if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi
 printf 'fixture-value\n' >"$SERVER/items"
 bump
 echo 'PASS: an unreachable server fails closed, and the failed forced sync is retried'
+
+# A cold start logs in once: the login's own full sync stands in for the
+# forced sync, which would log in a second time.
+rm -f "$profile/auth" "$profile/session" "$profile/forced-sync"
+: >"$LOG"
+[[ $("$agent" get password some-id) == fixture-value ]]
+grep -q '^login' "$LOG"
+if grep -q '^sync --force' "$LOG"; then exit 1; fi
+echo 'PASS: a cold start logs in once and skips the forced sync'
+
+# A login whose own sync failed still fails closed on the plain sync.
+rm -f "$profile/auth" "$profile/session" "$profile/forced-sync" "$profile/items" "$profile/revision"
+touch "$SERVER/offline"
+if "$agent" get password some-id >/dev/null 2>&1; then exit 1; fi
+rm "$SERVER/offline"
+[[ $("$agent" get password some-id) == fixture-value ]]
+echo 'PASS: a login whose sync failed serves nothing until a sync succeeds'
 
 # Rotating the API key moves the account revision date.
 printf secret-2 >"$SERVER/secret"
