@@ -196,10 +196,9 @@ owner's `bw-bridge`.
   unreachable. A plain sync catches each change that moves the account
   revision date, such as a revoked grant, at once, and logs in again on the
   server's rate-limited login route only when that date moved or its access
-  token expired. A forced sync
-  also catches anything else but always logs in, so it runs once the last
-  successful one is five minutes old on that host. Calls on one host
-  run one at a time under a host-wide lock.
+  token expired. A forced sync also catches anything else but always logs in,
+  so it runs once the last successful one is five minutes old on that host.
+  Calls on one host run one at a time under a host-wide lock.
 
 Provision a host by piping the identity JSON from the owner's vault, never
 through a terminal or argv:
