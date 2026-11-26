@@ -427,6 +427,7 @@ link_config "$SCRIPT_DIR/git/.gitconfig" "$HOME/.gitconfig"
 link_config "$SCRIPT_DIR/bat/config" "$HOME/.config/bat/config"
 link_config "$SCRIPT_DIR/nano/.nanorc" "$HOME/.nanorc"
 link_config "$SCRIPT_DIR/vim/.vimrc" "$HOME/.vimrc"
+link_config "$SCRIPT_DIR/cargo/config.toml" "$HOME/.cargo/config.toml"
 # atuin/config.toml is NOT symlinked here — setup_atuin() writes it via sed+mv substitution
 [[ "$PLATFORM" == "macos" ]] && link_config "$SCRIPT_DIR/ghostty/config" "$HOME/.config/ghostty/config"
 

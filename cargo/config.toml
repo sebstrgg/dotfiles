@@ -1,0 +1,12 @@
+# Cargo defaults for every machine (linked to ~/.cargo/config.toml by install.sh).
+#
+# Line-table debug info keeps file and line numbers in backtraces and drops the
+# variable and type information few of our debugging sessions use. Measured on
+# konvyra-crm (74 crates, Nov 2026): a clean build 22-38% faster, a rebuild after
+# a one-crate edit up to 54% faster and target/ 29-64% smaller.
+#
+# Incremental builds stay on (Cargo's default): turning them off made clean
+# builds faster but every edit rebuild about twice as slow. sccache was dropped:
+# it cannot cache incremental crates and was slower without them.
+[profile.dev]
+debug = "line-tables-only"
