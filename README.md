@@ -178,13 +178,12 @@ personal terminal choices: `CLAUDE_CODE_NO_FLICKER` and the agent-shell alias
 guard in `.zshrc`, the claude, codex, gemini and kimi windows in `tmux/session-dev.sh`,
 `dev-disk-trim`'s clean-up of idle worktree caches and old Codex runtimes,
 the Claude Code section of `tmux/tmux.conf` (passthrough and extended keys),
-`ripgrep` in the Brewfile, and the `.gitignore` rule for agent working state. The Bitwarden
-bridge (`bin/bw-bridge`, `bin/bw-vault`, `bin/bw-ssh` and the
-`bw-bridge-expire` launch agent) lets agents use the vault without seeing a
-credential. macOS uses Login Keychain; Linux uses a private expiring tmpfs
-cache shared with user services. `bin/bw-agent` runs a separate agent
-identity that unlocks unattended and sees only the collections it was granted
-([agent identity](docs/bitwarden-rbw-setup.md#agent-identity-bw-agent)).
+`ripgrep` in the Brewfile, and the `.gitignore` rule for agent working state. `bw-bridge`,
+`bw-vault`, `bw-session-cache`, and `bw-agent` now ship from
+`staav-wollter/agent-setup` into `~/.local/bin/`, while `bin/bw-ssh`,
+`bin/security`, and the `bw-bridge-expire` launch agent stay here (letting
+agents use the vault without seeing a credential; macOS uses Login Keychain,
+Linux uses a private expiring tmpfs cache shared with user services).
 Unlock and SSH socket setup live in the
 [Bitwarden runbook](docs/bitwarden-rbw-setup.md#wsl--linux-and-headless-agent-hosts).
 

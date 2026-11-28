@@ -104,7 +104,7 @@ PATH. The macOS-only `bw-ssh` helper still uses Apple's absolute tool path.
 
 Close early with `tools/access/bitwarden-session close` in personal-infra,
 and `rbw lock` for SSH keys. Agents never invoke interactive `bw-bridge` or
-`rbw unlock`. Linux regression: `bash tests/bw-bridge.test.sh`.
+`rbw unlock`. Linux regression: `tests/bw-bridge.test.py` in `staav-wollter/agent-setup`.
 
 ---
 
@@ -217,7 +217,7 @@ after a key rotation replaces the old login.
 organization, which cuts access for all hosts at once; only an owner can
 re-invite it. An owner can also revoke the member in the web vault.
 `bw-agent forget` removes one host's stored identity and state.
-Linux regression: `bash tests/bw-agent.test.sh`.
+Linux regression: `tests/bw-agent.test.py` in `staav-wollter/agent-setup`.
 
 ---
 
