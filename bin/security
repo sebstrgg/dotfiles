@@ -8,7 +8,8 @@ command=${1:-}
 shift || exit 64
 [[ ${1:-} == -a && ${2:-} == "$(id -un)" && ${3:-} == -s && ${4:-} == personal-infra-bitwarden-session ]] || exit 64
 shift 4
-cache=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bw-session-cache
+cache=$(type -P bw-session-cache 2>/dev/null || printf '%s\n' "$HOME/.local/bin/bw-session-cache")
+[[ -x $cache ]] || exit 64
 case $command in
 find-generic-password)
 	[[ $# == 1 && $1 == -w ]] || exit 64
